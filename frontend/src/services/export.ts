@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
@@ -16,50 +16,69 @@ const formatDate = (dateStr: string) => {
   }
 };
 
-export function exportToExcel(
+async function downloadExcel(wb: ExcelJS.Workbook, filename: string) {
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${filename}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function exportToExcel(
   transactions: Transaction[],
   filename: string = 'relatorio',
   summary?: { totalIncome: number; totalExpenses: number; balance: number }
 ) {
-  const wb = XLSX.utils.book_new();
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Lançamentos');
 
-  // Transactions sheet
-  const rows = transactions.map((t) => ({
-    'Data': formatDate(t.date),
-    'Tipo': t.type === 'income' ? 'Receita' : 'Despesa',
-    'Projeto': t.project_name || '',
-    'Categoria': t.category_name || '',
-    'Descrição': t.description,
-    'Fornecedor/Cliente': t.vendor || '',
-    'Nº Documento': t.document_number || '',
-    'Forma Pagamento': t.payment_method || '',
-    'Valor (R$)': t.amount,
-    'Observações': t.notes || '',
-  }));
-
-  const ws = XLSX.utils.json_to_sheet(rows);
-
-  // Column widths
-  ws['!cols'] = [
-    { wch: 12 }, { wch: 10 }, { wch: 25 }, { wch: 22 }, { wch: 35 },
-    { wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 15 }, { wch: 30 },
+  ws.columns = [
+    { header: 'Data', key: 'data', width: 12 },
+    { header: 'Tipo', key: 'tipo', width: 10 },
+    { header: 'Projeto', key: 'projeto', width: 25 },
+    { header: 'Categoria', key: 'categoria', width: 22 },
+    { header: 'Descrição', key: 'descricao', width: 35 },
+    { header: 'Fornecedor/Cliente', key: 'fornecedor', width: 25 },
+    { header: 'Nº Documento', key: 'documento', width: 15 },
+    { header: 'Forma Pagamento', key: 'pagamento', width: 18 },
+    { header: 'Valor (R$)', key: 'valor', width: 15 },
+    { header: 'Observações', key: 'observacoes', width: 30 },
   ];
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Lançamentos');
+  transactions.forEach((t) => {
+    ws.addRow({
+      data: formatDate(t.date),
+      tipo: t.type === 'income' ? 'Receita' : 'Despesa',
+      projeto: t.project_name || '',
+      categoria: t.category_name || '',
+      descricao: t.description,
+      fornecedor: t.vendor || '',
+      documento: t.document_number || '',
+      pagamento: t.payment_method || '',
+      valor: t.amount,
+      observacoes: t.notes || '',
+    });
+  });
 
-  // Summary sheet
   if (summary) {
-    const summaryData = [
-      { 'Indicador': 'Total de Receitas', 'Valor (R$)': summary.totalIncome },
-      { 'Indicador': 'Total de Despesas', 'Valor (R$)': summary.totalExpenses },
-      { 'Indicador': 'Saldo', 'Valor (R$)': summary.balance },
+    const wsSummary = wb.addWorksheet('Resumo');
+    wsSummary.columns = [
+      { header: 'Indicador', key: 'indicador', width: 25 },
+      { header: 'Valor (R$)', key: 'valor', width: 18 },
     ];
-    const wsSummary = XLSX.utils.json_to_sheet(summaryData);
-    wsSummary['!cols'] = [{ wch: 25 }, { wch: 18 }];
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Resumo');
+    wsSummary.addRows([
+      { indicador: 'Total de Receitas', valor: summary.totalIncome },
+      { indicador: 'Total de Despesas', valor: summary.totalExpenses },
+      { indicador: 'Saldo', valor: summary.balance },
+    ]);
   }
 
-  XLSX.writeFile(wb, `${filename}.xlsx`);
+  await downloadExcel(wb, filename);
 }
 
 export function exportToPDF(
@@ -160,32 +179,37 @@ export function exportToPDF(
   doc.save(`${title.replace(/\s+/g, '_')}.pdf`);
 }
 
-export function exportBudgetComparisonToExcel(data: any[], filename: string = 'comparativo_orcamento') {
-  const wb = XLSX.utils.book_new();
+export async function exportBudgetComparisonToExcel(data: any[], filename: string = 'comparativo_orcamento') {
+  const wb = new ExcelJS.Workbook();
 
   data.forEach((project) => {
     const rows = project.categories.map((c: any) => ({
-      'Categoria': c.name,
-      'Orçado (R$)': c.budget,
-      'Realizado (R$)': c.actual_expense,
-      'Diferença (R$)': c.budget - c.actual_expense,
-      'Utilização (%)': c.budget > 0 ? ((c.actual_expense / c.budget) * 100).toFixed(1) + '%' : 'N/A',
+      categoria: c.name,
+      orcado: c.budget,
+      realizado: c.actual_expense,
+      diferenca: c.budget - c.actual_expense,
+      utilizacao: c.budget > 0 ? ((c.actual_expense / c.budget) * 100).toFixed(1) + '%' : 'N/A',
     }));
 
-    // Add totals row
     rows.push({
-      'Categoria': 'TOTAL',
-      'Orçado (R$)': project.totalBudget,
-      'Realizado (R$)': project.totalActual,
-      'Diferença (R$)': project.totalBudget - project.totalActual,
-      'Utilização (%)': project.totalBudget > 0 ? ((project.totalActual / project.totalBudget) * 100).toFixed(1) + '%' : 'N/A',
+      categoria: 'TOTAL',
+      orcado: project.totalBudget,
+      realizado: project.totalActual,
+      diferenca: project.totalBudget - project.totalActual,
+      utilizacao: project.totalBudget > 0 ? ((project.totalActual / project.totalBudget) * 100).toFixed(1) + '%' : 'N/A',
     });
 
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{ wch: 25 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 14 }];
     const sheetName = project.name.slice(0, 31).replace(/[\\/:*?[\]]/g, '_');
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    const ws = wb.addWorksheet(sheetName);
+    ws.columns = [
+      { header: 'Categoria', key: 'categoria', width: 25 },
+      { header: 'Orçado (R$)', key: 'orcado', width: 16 },
+      { header: 'Realizado (R$)', key: 'realizado', width: 16 },
+      { header: 'Diferença (R$)', key: 'diferenca', width: 16 },
+      { header: 'Utilização (%)', key: 'utilizacao', width: 14 },
+    ];
+    ws.addRows(rows);
   });
 
-  XLSX.writeFile(wb, `${filename}.xlsx`);
+  await downloadExcel(wb, filename);
 }

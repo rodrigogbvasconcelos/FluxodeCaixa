@@ -56,15 +56,15 @@ export default function Reports() {
     else loadBudgetReport();
   }, [tab, loadReport, loadBudgetReport]);
 
-  const handleExcelExport = () => {
+  const handleExcelExport = async () => {
     if (tab === 'cash-flow') {
-      exportToExcel(transactions, 'fluxo_de_caixa', summary ? {
+      await exportToExcel(transactions, 'fluxo_de_caixa', summary ? {
         totalIncome: summary.total_income, totalExpenses: summary.total_expenses,
         balance: summary.total_income - summary.total_expenses
       } : undefined);
       toast.success('Excel exportado!');
     } else {
-      exportBudgetComparisonToExcel(budgetData, 'comparativo_orcamento');
+      await exportBudgetComparisonToExcel(budgetData, 'comparativo_orcamento');
       toast.success('Excel exportado!');
     }
   };
