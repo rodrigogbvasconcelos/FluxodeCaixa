@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderOpen, ArrowUpDown, PieChart, Calculator,
-  FileText, Upload, Users, Settings, ChevronLeft, ChevronRight,
-  HardHat, LogOut
+  FileText, Upload, Users, ChevronLeft, ChevronRight,
+  HardHat, LogOut, BookUser
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import clsx from 'clsx';
@@ -17,6 +17,7 @@ const navItems = [
   { path: '/invoice-import', label: 'Importar NF', icon: Upload, roles: ['admin', 'manager', 'operator'] },
   { path: '/users', label: 'Usuários', icon: Users, roles: ['admin'] },
   { path: '/categories', label: 'Categorias', icon: PieChart, roles: ['admin', 'manager'] },
+  { path: '/contacts', label: 'Contatos', icon: BookUser, roles: ['admin', 'manager', 'operator'] },
 ];
 
 export default function Sidebar() {

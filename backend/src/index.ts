@@ -10,6 +10,7 @@ import transactionRoutes from './routes/transactions';
 import budgetRoutes from './routes/budgets';
 import invoiceRoutes from './routes/invoices';
 import reportRoutes from './routes/reports';
+import contactRoutes from './routes/contacts';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -30,6 +31,7 @@ app.use('/api/transactions', transactionRoutes);
 app.use('/api/budgets', budgetRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/contacts', contactRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', version: '1.0.0' }));
 
