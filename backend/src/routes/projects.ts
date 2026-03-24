@@ -1,0 +1,96 @@
+import { Router, Response } from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import db from '../database';
+import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+
+const router = Router();
+router.use(authenticate);
+
+router.get('/', (req: AuthRequest, res: Response) => {
+  const projects = db.prepare(`
+    SELECT p.*,
+      u.name as created_by_name,
+      (SELECT SUM(amount) FROM transactions WHERE project_id = p.id AND type = 'income') as total_income,
+      (SELECT SUM(amount) FROM transactions WHERE project_id = p.id AND type = 'expense') as total_expenses
+    FROM projects p
+    LEFT JOIN users u ON u.id = p.created_by
+    ORDER BY p.created_at DESC
+  `).all();
+  res.json(projects);
+});
+
+router.get('/:id', (req: AuthRequest, res: Response) => {
+  const project = db.prepare(`
+    SELECT p.*,
+      u.name as created_by_name,
+      (SELECT SUM(amount) FROM transactions WHERE project_id = p.id AND type = 'income') as total_income,
+      (SELECT SUM(amount) FROM transactions WHERE project_id = p.id AND type = 'expense') as total_expenses
+    FROM projects p
+    LEFT JOIN users u ON u.id = p.created_by
+    WHERE p.id = ?
+  `).get(req.params.id);
+
+  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+  res.json(project);
+});
+
+router.post('/', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
+  const { name, description, client, address, start_date, end_date, total_budget } = req.body;
+  if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
+
+  const id = uuidv4();
+  db.prepare(`
+    INSERT INTO projects (id, name, description, client, address, start_date, end_date, total_budget, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, description || null, client || null, address || null,
+         start_date || null, end_date || null, total_budget || 0, req.user!.id);
+
+  res.status(201).json({ id, name });
+});
+
+router.put('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
+  const { name, description, client, address, start_date, end_date, status, total_budget } = req.body;
+  db.prepare(`
+    UPDATE projects SET name = ?, description = ?, client = ?, address = ?,
+    start_date = ?, end_date = ?, status = ?, total_budget = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(name, description || null, client || null, address || null,
+         start_date || null, end_date || null, status || 'active', total_budget || 0, req.params.id);
+  res.json({ message: 'Projeto atualizado' });
+});
+
+router.delete('/:id', requireRole('admin'), (req: AuthRequest, res: Response) => {
+  db.prepare('UPDATE projects SET status = ? WHERE id = ?').run('archived', req.params.id);
+  res.json({ message: 'Projeto arquivado' });
+});
+
+// Project summary with budget vs actual
+router.get('/:id/summary', (req: AuthRequest, res: Response) => {
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as any;
+  if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+
+  const byCategory = db.prepare(`
+    SELECT c.id, c.name, c.type, c.color,
+      COALESCE(SUM(t.amount), 0) as actual,
+      COALESCE((SELECT SUM(b.amount) FROM budgets b WHERE b.category_id = c.id AND b.project_id = ?), 0) as budget
+    FROM categories c
+    LEFT JOIN transactions t ON t.category_id = c.id AND t.project_id = ?
+    WHERE c.type = 'expense'
+    GROUP BY c.id
+    ORDER BY actual DESC
+  `).all(req.params.id, req.params.id);
+
+  const monthlyFlow = db.prepare(`
+    SELECT strftime('%Y-%m', date) as month,
+      SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as income,
+      SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as expense
+    FROM transactions
+    WHERE project_id = ?
+    GROUP BY month
+    ORDER BY month
+  `).all(req.params.id);
+
+  res.json({ project, byCategory, monthlyFlow });
+});
+
+export default router;

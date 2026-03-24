@@ -1,0 +1,375 @@
+import React, { useEffect, useState, useCallback } from 'react';
+import { Plus, Search, Edit2, Trash2, Filter, FileText, ArrowUpRight, ArrowDownRight, ChevronLeft, ChevronRight } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import api from '../services/api';
+import { Transaction, Project, Category } from '../types';
+import Modal from '../components/UI/Modal';
+import ConfirmDialog from '../components/UI/ConfirmDialog';
+import { useAuth } from '../contexts/AuthContext';
+
+const fmtCurrency = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+const fmtDate = (d: string) => { try { return format(new Date(d + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR }); } catch { return d; } };
+
+const paymentMethods = ['Dinheiro', 'PIX', 'Transferência', 'Boleto', 'Cartão de Débito', 'Cartão de Crédito', 'Cheque'];
+
+const emptyForm = {
+  project_id: '', category_id: '', type: 'expense' as 'income' | 'expense',
+  amount: '', description: '', vendor: '', document_number: '',
+  date: new Date().toISOString().split('T')[0], payment_method: '', notes: '', invoice_id: ''
+};
+
+export default function Transactions() {
+  const { hasRole } = useAuth();
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Transaction | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [filters, setFilters] = useState({ search: '', project_id: '', type: '', category_id: '', start_date: '', end_date: '' });
+  const [showFilters, setShowFilters] = useState(false);
+  const LIMIT = 20;
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const params: any = { page, limit: LIMIT };
+    if (filters.project_id) params.project_id = filters.project_id;
+    if (filters.type) params.type = filters.type;
+    if (filters.category_id) params.category_id = filters.category_id;
+    if (filters.start_date) params.start_date = filters.start_date;
+    if (filters.end_date) params.end_date = filters.end_date;
+
+    api.get('/transactions', { params }).then(r => {
+      setTransactions(r.data.data);
+      setTotal(r.data.total);
+    }).finally(() => setLoading(false));
+  }, [page, filters]);
+
+  useEffect(load, [load]);
+
+  useEffect(() => {
+    api.get('/projects').then(r => setProjects(r.data));
+    api.get('/categories').then(r => setCategories(r.data));
+  }, []);
+
+  const openNew = (type?: 'income' | 'expense') => {
+    setEditing(null);
+    setForm({ ...emptyForm, type: type || 'expense' });
+    setModalOpen(true);
+  };
+
+  const openEdit = (t: Transaction) => {
+    setEditing(t);
+    setForm({
+      project_id: t.project_id, category_id: t.category_id, type: t.type,
+      amount: String(t.amount), description: t.description, vendor: t.vendor || '',
+      document_number: t.document_number || '', date: t.date,
+      payment_method: t.payment_method || '', notes: t.notes || '', invoice_id: t.invoice_id || ''
+    });
+    setModalOpen(true);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = { ...form, amount: parseFloat(form.amount) };
+      if (editing) {
+        await api.put(`/transactions/${editing.id}`, payload);
+        toast.success('Lançamento atualizado!');
+      } else {
+        await api.post('/transactions', payload);
+        toast.success('Lançamento criado!');
+      }
+      setModalOpen(false);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Erro ao salvar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await api.delete(`/transactions/${deleteTarget.id}`);
+      toast.success('Lançamento excluído');
+      load();
+    } catch {
+      toast.error('Erro ao excluir');
+    }
+  };
+
+  const filteredCategories = categories.filter(c => c.type === form.type);
+  const totalPages = Math.ceil(total / LIMIT);
+
+  const totalIncome = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const totalExpense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+
+  return (
+    <div className="space-y-5 animate-fade-in">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Lançamentos</h1>
+          <p className="text-gray-500 text-sm">{total} lançamento(s)</p>
+        </div>
+        {hasRole('admin', 'manager', 'operator') && (
+          <div className="flex gap-2">
+            <button onClick={() => openNew('income')} className="btn-success text-sm">
+              <ArrowUpRight size={15} /> Receita
+            </button>
+            <button onClick={() => openNew('expense')} className="btn-danger text-sm">
+              <ArrowDownRight size={15} /> Despesa
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+          <div className="text-xs text-emerald-600 font-medium">Receitas (página)</div>
+          <div className="text-lg font-bold text-emerald-700">{fmtCurrency(totalIncome)}</div>
+        </div>
+        <div className="bg-red-50 border border-red-100 rounded-xl p-3">
+          <div className="text-xs text-red-600 font-medium">Despesas (página)</div>
+          <div className="text-lg font-bold text-red-700">{fmtCurrency(totalExpense)}</div>
+        </div>
+        <div className={`${totalIncome - totalExpense >= 0 ? 'bg-blue-50 border-blue-100' : 'bg-orange-50 border-orange-100'} border rounded-xl p-3`}>
+          <div className={`text-xs font-medium ${totalIncome - totalExpense >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>Saldo (página)</div>
+          <div className={`text-lg font-bold ${totalIncome - totalExpense >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>
+            {fmtCurrency(totalIncome - totalExpense)}
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="card p-4">
+        <div className="flex gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input placeholder="Buscar..." value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+              className="form-input pl-8 py-2 text-sm" />
+          </div>
+          <select className="form-input py-2 text-sm min-w-[140px]" value={filters.project_id}
+            onChange={e => { setFilters(f => ({ ...f, project_id: e.target.value })); setPage(1); }}>
+            <option value="">Todos projetos</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <select className="form-input py-2 text-sm min-w-[120px]" value={filters.type}
+            onChange={e => { setFilters(f => ({ ...f, type: e.target.value })); setPage(1); }}>
+            <option value="">Todos tipos</option>
+            <option value="income">Receitas</option>
+            <option value="expense">Despesas</option>
+          </select>
+          <button onClick={() => setShowFilters(!showFilters)} className="btn-secondary text-sm py-2">
+            <Filter size={14} /> {showFilters ? 'Menos' : 'Mais'} filtros
+          </button>
+        </div>
+        {showFilters && (
+          <div className="flex gap-3 flex-wrap mt-3 pt-3 border-t border-gray-100">
+            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+              <span className="text-xs text-gray-500">De:</span>
+              <input type="date" className="form-input py-2 text-sm flex-1" value={filters.start_date}
+                onChange={e => { setFilters(f => ({ ...f, start_date: e.target.value })); setPage(1); }} />
+            </div>
+            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+              <span className="text-xs text-gray-500">Até:</span>
+              <input type="date" className="form-input py-2 text-sm flex-1" value={filters.end_date}
+                onChange={e => { setFilters(f => ({ ...f, end_date: e.target.value })); setPage(1); }} />
+            </div>
+            <button onClick={() => { setFilters({ search: '', project_id: '', type: '', category_id: '', start_date: '', end_date: '' }); setPage(1); }}
+              className="btn-secondary text-sm py-2 text-red-500">Limpar</button>
+          </div>
+        )}
+      </div>
+
+      {/* Table */}
+      <div className="card p-0 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Data</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Tipo</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Projeto</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Categoria</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Descrição</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Fornecedor</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Valor</th>
+                {hasRole('admin', 'manager') && <th className="px-4 py-3 w-20"></th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {loading ? (
+                <tr><td colSpan={8} className="text-center py-12 text-gray-400">Carregando...</td></tr>
+              ) : transactions.length === 0 ? (
+                <tr><td colSpan={8} className="text-center py-12 text-gray-400">Nenhum lançamento encontrado</td></tr>
+              ) : (
+                transactions.map(t => (
+                  <tr key={t.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3 whitespace-nowrap text-gray-600">{fmtDate(t.date)}</td>
+                    <td className="px-4 py-3">
+                      <span className={t.type === 'income' ? 'badge-income' : 'badge-expense'}>
+                        {t.type === 'income' ? '↑ Receita' : '↓ Despesa'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-700 max-w-[150px] truncate">{t.project_name}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-1.5 text-xs">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.category_color || '#6B7280' }} />
+                        {t.category_name}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-700 max-w-[200px]">
+                      <div className="truncate">{t.description}</div>
+                      {t.invoice_name && (
+                        <div className="flex items-center gap-1 text-xs text-blue-500 mt-0.5">
+                          <FileText size={10} /> {t.invoice_name}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 max-w-[120px] truncate">{t.vendor || '-'}</td>
+                    <td className={`px-4 py-3 text-right font-semibold ${t.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {t.type === 'expense' ? '-' : '+'}{fmtCurrency(t.amount)}
+                    </td>
+                    {hasRole('admin', 'manager') && (
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1">
+                          <button onClick={() => openEdit(t)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
+                            <Edit2 size={14} />
+                          </button>
+                          <button onClick={() => setDeleteTarget(t)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+            <span className="text-xs text-gray-500">
+              Mostrando {Math.min((page - 1) * LIMIT + 1, total)}–{Math.min(page * LIMIT, total)} de {total}
+            </span>
+            <div className="flex gap-1">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                className="p-1.5 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">
+                <ChevronLeft size={14} />
+              </button>
+              <span className="px-3 py-1 text-sm text-gray-600">{page}/{totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+                className="p-1.5 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Modal */}
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)}
+        title={editing ? 'Editar Lançamento' : form.type === 'income' ? 'Nova Receita' : 'Nova Despesa'} size="xl">
+        <form onSubmit={handleSave} className="space-y-4">
+          {/* Type toggle */}
+          {!editing && (
+            <div className="flex rounded-lg overflow-hidden border border-gray-200">
+              <button type="button" onClick={() => setForm(f => ({ ...f, type: 'income', category_id: '' }))}
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${form.type === 'income' ? 'bg-emerald-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                ↑ Receita
+              </button>
+              <button type="button" onClick={() => setForm(f => ({ ...f, type: 'expense', category_id: '' }))}
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${form.type === 'expense' ? 'bg-red-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                ↓ Despesa
+              </button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="form-label">Projeto *</label>
+              <select className="form-input" value={form.project_id} onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))} required>
+                <option value="">Selecione...</option>
+                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Categoria *</label>
+              <select className="form-input" value={form.category_id} onChange={e => setForm(f => ({ ...f, category_id: e.target.value }))} required>
+                <option value="">Selecione...</option>
+                {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Valor (R$) *</label>
+              <input type="number" step="0.01" min="0.01" className="form-input" value={form.amount}
+                onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} placeholder="0,00" required />
+            </div>
+            <div>
+              <label className="form-label">Data *</label>
+              <input type="date" className="form-input" value={form.date}
+                onChange={e => setForm(f => ({ ...f, date: e.target.value }))} required />
+            </div>
+            <div className="md:col-span-2">
+              <label className="form-label">Descrição *</label>
+              <input className="form-input" value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))} required />
+            </div>
+            <div>
+              <label className="form-label">{form.type === 'income' ? 'Cliente' : 'Fornecedor'}</label>
+              <input className="form-input" value={form.vendor}
+                onChange={e => setForm(f => ({ ...f, vendor: e.target.value }))} />
+            </div>
+            <div>
+              <label className="form-label">Nº Documento / NF</label>
+              <input className="form-input" value={form.document_number}
+                onChange={e => setForm(f => ({ ...f, document_number: e.target.value }))} />
+            </div>
+            <div>
+              <label className="form-label">Forma de Pagamento</label>
+              <select className="form-input" value={form.payment_method}
+                onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))}>
+                <option value="">Selecione...</option>
+                {paymentMethods.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="form-label">Observações</label>
+              <textarea className="form-input" rows={2} value={form.notes}
+                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+          </div>
+
+          <div className="flex gap-3 justify-end pt-2">
+            <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancelar</button>
+            <button type="submit" disabled={saving}
+              className={form.type === 'income' ? 'btn-success' : 'btn-danger'}>
+              {saving ? 'Salvando...' : editing ? 'Atualizar' : 'Lançar'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete}
+        title="Excluir Lançamento"
+        message={`Deseja excluir o lançamento "${deleteTarget?.description}"?`}
+        confirmLabel="Excluir" danger
+      />
+    </div>
+  );
+}
