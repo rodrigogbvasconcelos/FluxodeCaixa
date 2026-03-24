@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
+import rateLimit from 'express-rate-limit';
 import db from '../database';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { extractInvoiceData } from '../services/invoiceExtractor';
@@ -10,39 +11,66 @@ import { extractInvoiceData } from '../services/invoiceExtractor';
 const router = Router();
 router.use(authenticate);
 
-const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
+const UPLOAD_DIR = path.resolve(path.join(__dirname, '..', '..', 'uploads'));
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+// Allowed MIME types mapped to safe Content-Type values
+const ALLOWED_MIME_TYPES: Record<string, string> = {
+  'application/pdf': 'application/pdf',
+  'image/png':       'image/png',
+  'image/jpeg':      'image/jpeg',
+  'text/plain':      'text/plain; charset=utf-8',
+};
+
+// File extensions allowed (derived from the MIME map above)
+const ALLOWED_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.txt']);
+
 const storage = multer.diskStorage({
   destination: UPLOAD_DIR,
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
+    const ext = path.extname(file.originalname).toLowerCase();
+    // Only use the safe extension; UUID ensures no path components
     cb(null, `${uuidv4()}${ext}`);
   }
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (req, file, cb) => {
-    const allowed = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'text/plain'];
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Tipo de arquivo não permitido'));
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ALLOWED_MIME_TYPES[file.mimetype] && ALLOWED_EXTENSIONS.has(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Tipo de arquivo não permitido'));
+    }
   }
 });
 
-router.post('/upload', upload.single('invoice'), async (req: AuthRequest, res: Response) => {
+// Upload rate limit: 20 uploads / 15 min per IP
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Limite de uploads atingido. Tente novamente em 15 minutos.' },
+});
+
+router.post('/upload', uploadLimiter, upload.single('invoice'), async (req: AuthRequest, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'Arquivo não fornecido' });
 
   const extracted = await extractInvoiceData(req.file.path, req.file.mimetype);
   const id = uuidv4();
 
+  // Store only the basename (UUID filename), never the full path
+  const safeFilename = path.basename(req.file.filename);
+
   db.prepare(`
     INSERT INTO invoices (id, original_name, file_path, file_size, mime_type, extracted_data, uploaded_by)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, req.file.originalname, req.file.filename, req.file.size,
+  `).run(id, req.file.originalname, safeFilename, req.file.size,
          req.file.mimetype, JSON.stringify(extracted), req.user!.id);
 
   res.json({ id, extracted, filename: req.file.originalname });
@@ -52,12 +80,28 @@ router.get('/:id/download', (req: AuthRequest, res: Response) => {
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id) as any;
   if (!invoice) return res.status(404).json({ error: 'Arquivo não encontrado' });
 
-  const filePath = path.join(UPLOAD_DIR, invoice.file_path);
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Arquivo não encontrado no disco' });
+  // Resolve and verify the file stays inside UPLOAD_DIR (prevent path traversal)
+  const resolvedPath = path.resolve(path.join(UPLOAD_DIR, path.basename(invoice.file_path)));
+  if (!resolvedPath.startsWith(UPLOAD_DIR + path.sep) && resolvedPath !== UPLOAD_DIR) {
+    return res.status(400).json({ error: 'Caminho de arquivo inválido' });
+  }
 
-  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(invoice.original_name)}"`);
-  res.setHeader('Content-Type', invoice.mime_type || 'application/octet-stream');
-  res.sendFile(filePath);
+  if (!fs.existsSync(resolvedPath)) {
+    return res.status(404).json({ error: 'Arquivo não encontrado no disco' });
+  }
+
+  // Use only allow-listed MIME types; never trust what's stored in the DB directly
+  const safeContentType = ALLOWED_MIME_TYPES[invoice.mime_type] || 'application/octet-stream';
+
+  // Sanitize original_name before placing in header
+  const safeName = (invoice.original_name || 'arquivo')
+    .replace(/[^\w.\-\s]/g, '_')
+    .slice(0, 200);
+
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeName)}"`);
+  res.setHeader('Content-Type', safeContentType);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.sendFile(resolvedPath);
 });
 
 router.get('/:id', (req: AuthRequest, res: Response) => {

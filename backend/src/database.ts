@@ -104,6 +104,24 @@ export function initDatabase() {
       FOREIGN KEY (created_by) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      user_name TEXT,
+      user_email TEXT,
+      action TEXT NOT NULL,
+      table_name TEXT,
+      record_id TEXT,
+      old_data TEXT,
+      new_data TEXT,
+      ip_address TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_table ON audit_logs(table_name);
+    CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
+
     CREATE TABLE IF NOT EXISTS contacts (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -125,13 +143,28 @@ export function initDatabase() {
     );
   `);
 
+  // Migrations: add new columns to existing tables if not present
+  const txMigrations: [string, string][] = [
+    ['due_date',           'ALTER TABLE transactions ADD COLUMN due_date TEXT'],
+    ['payment_date',       'ALTER TABLE transactions ADD COLUMN payment_date TEXT'],
+    ['status',             "ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'paid'"],
+    ['installments',       'ALTER TABLE transactions ADD COLUMN installments INTEGER NOT NULL DEFAULT 1'],
+    ['installment_number', 'ALTER TABLE transactions ADD COLUMN installment_number INTEGER NOT NULL DEFAULT 1'],
+    ['parent_id',          'ALTER TABLE transactions ADD COLUMN parent_id TEXT'],
+  ];
+  for (const [, sql] of txMigrations) {
+    try { db.exec(sql); } catch { /* column already exists */ }
+  }
+
   // Seed default admin user if not exists
+  // IMPORTANT: Change the default password immediately after first login.
   const adminExists = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@empresa.com');
   if (!adminExists) {
     const { v4: uuidv4 } = require('uuid');
-    const hash = bcrypt.hashSync('admin123', 10);
+    const hash = bcrypt.hashSync('Admin123', 10); // Must be changed on first login
     db.prepare(`INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)`)
       .run(uuidv4(), 'Administrador', 'admin@empresa.com', hash, 'admin');
+    console.warn('[SEGURANÇA] Usuário administrador padrão criado. TROQUE A SENHA IMEDIATAMENTE: admin@empresa.com');
   }
 
   // Seed default categories

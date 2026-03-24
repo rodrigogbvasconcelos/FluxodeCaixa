@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderOpen, ArrowUpDown, PieChart, Calculator,
   FileText, Upload, Users, ChevronLeft, ChevronRight,
-  HardHat, LogOut, BookUser
+  HardHat, LogOut, BookUser, Wallet
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import clsx from 'clsx';
@@ -18,6 +18,7 @@ const navItems = [
   { path: '/users', label: 'Usuários', icon: Users, roles: ['admin'] },
   { path: '/categories', label: 'Categorias', icon: PieChart, roles: ['admin', 'manager'] },
   { path: '/contacts', label: 'Contatos', icon: BookUser, roles: ['admin', 'manager', 'operator'] },
+  { path: '/payables', label: 'Contas a Pagar/Receber', icon: Wallet, roles: ['admin', 'manager', 'operator'] },
 ];
 
 export default function Sidebar() {
