@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../database';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { logAudit, getIp } from '../middleware/audit';
 
 const router = Router();
 router.use(authenticate);
@@ -57,6 +58,13 @@ router.post('/', requireRole('admin'), (req: AuthRequest, res: Response) => {
   db.prepare('INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)')
     .run(id, name.trim(), normalizedEmail, hash, role);
 
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'CREATE', tableName: 'users', recordId: id,
+    newData: { name: name.trim(), email: normalizedEmail, role },
+    ip: getIp(req),
+  });
+
   res.status(201).json({ id, name: name.trim(), email: normalizedEmail, role });
 });
 
@@ -81,13 +89,21 @@ router.put('/:id', requireRole('admin'), (req: AuthRequest, res: Response) => {
   }
 
   const normalizedEmail = email.toLowerCase().trim();
-
-  // Check for email conflict with another user
   const conflict = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(normalizedEmail, req.params.id);
   if (conflict) return res.status(400).json({ error: 'Email já cadastrado para outro usuário' });
 
+  const old = db.prepare('SELECT id, name, email, role, active FROM users WHERE id = ?').get(req.params.id) as any;
+
   db.prepare('UPDATE users SET name = ?, email = ?, role = ?, active = ?, updated_at = datetime("now") WHERE id = ?')
     .run(name.trim(), normalizedEmail, role, active ? 1 : 0, req.params.id);
+
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'UPDATE', tableName: 'users', recordId: req.params.id,
+    oldData: old ?? null,
+    newData: { name: name.trim(), email: normalizedEmail, role, active: active ? 1 : 0 },
+    ip: getIp(req),
+  });
 
   res.json({ message: 'Usuário atualizado' });
 });
@@ -107,6 +123,12 @@ router.put('/:id/reset-password', requireRole('admin'), (req: AuthRequest, res: 
   db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime("now") WHERE id = ?')
     .run(hash, req.params.id);
 
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'RESET_PASSWORD', tableName: 'users', recordId: req.params.id,
+    ip: getIp(req),
+  });
+
   res.json({ message: 'Senha redefinida' });
 });
 
@@ -114,7 +136,17 @@ router.delete('/:id', requireRole('admin'), (req: AuthRequest, res: Response) =>
   if (req.params.id === req.user!.id) {
     return res.status(400).json({ error: 'Não é possível excluir o próprio usuário' });
   }
+
+  const old = db.prepare('SELECT id, name, email, role FROM users WHERE id = ?').get(req.params.id) as any;
   db.prepare('UPDATE users SET active = 0 WHERE id = ?').run(req.params.id);
+
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'DEACTIVATE', tableName: 'users', recordId: req.params.id,
+    oldData: old ?? null,
+    ip: getIp(req),
+  });
+
   res.json({ message: 'Usuário desativado' });
 });
 

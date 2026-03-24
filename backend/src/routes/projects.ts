@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../database';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { logAudit, getIp } from '../middleware/audit';
 
 const router = Router();
 router.use(authenticate);
@@ -45,26 +46,54 @@ router.post('/', requireRole('admin', 'manager'), (req: AuthRequest, res: Respon
   `).run(id, name, description || null, client || null, address || null,
          start_date || null, end_date || null, total_budget || 0, req.user!.id);
 
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'CREATE', tableName: 'projects', recordId: id,
+    newData: { name, description, client, address, start_date, end_date, total_budget },
+    ip: getIp(req),
+  });
+
   res.status(201).json({ id, name });
 });
 
 router.put('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
   const { name, description, client, address, start_date, end_date, status, total_budget } = req.body;
+
+  const old = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as any;
+
   db.prepare(`
     UPDATE projects SET name = ?, description = ?, client = ?, address = ?,
     start_date = ?, end_date = ?, status = ?, total_budget = ?, updated_at = datetime('now')
     WHERE id = ?
   `).run(name, description || null, client || null, address || null,
          start_date || null, end_date || null, status || 'active', total_budget || 0, req.params.id);
+
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'UPDATE', tableName: 'projects', recordId: req.params.id,
+    oldData: old ?? null,
+    newData: { name, description, client, address, start_date, end_date, status, total_budget },
+    ip: getIp(req),
+  });
+
   res.json({ message: 'Projeto atualizado' });
 });
 
 router.delete('/:id', requireRole('admin'), (req: AuthRequest, res: Response) => {
+  const old = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as any;
   db.prepare('UPDATE projects SET status = ? WHERE id = ?').run('archived', req.params.id);
+
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'ARCHIVE', tableName: 'projects', recordId: req.params.id,
+    oldData: old ?? null,
+    newData: { status: 'archived' },
+    ip: getIp(req),
+  });
+
   res.json({ message: 'Projeto arquivado' });
 });
 
-// Project summary with budget vs actual
 router.get('/:id/summary', (req: AuthRequest, res: Response) => {
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as any;
   if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });

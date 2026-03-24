@@ -104,6 +104,24 @@ export function initDatabase() {
       FOREIGN KEY (created_by) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      user_name TEXT,
+      user_email TEXT,
+      action TEXT NOT NULL,
+      table_name TEXT,
+      record_id TEXT,
+      old_data TEXT,
+      new_data TEXT,
+      ip_address TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_table ON audit_logs(table_name);
+    CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
+
     CREATE TABLE IF NOT EXISTS contacts (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

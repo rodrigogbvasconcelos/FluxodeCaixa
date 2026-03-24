@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../database';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { logAudit, getIp } from '../middleware/audit';
 
 const router = Router();
 router.use(authenticate);
@@ -17,7 +18,6 @@ router.get('/', (req: AuthRequest, res: Response) => {
   const page  = isNaN(rawPage)  || rawPage  < 1 ? 1  : rawPage;
   const limit = isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, MAX_PAGE_SIZE);
 
-  // Validate type filter if provided
   if (type && !VALID_TYPES.has(String(type))) {
     return res.status(400).json({ error: 'Tipo inválido' });
   }
@@ -81,6 +81,14 @@ router.post('/', requireRole('admin', 'manager', 'operator'), (req: AuthRequest,
          document_number || null, date, payment_method || null, notes || null,
          invoice_id || null, req.user!.id);
 
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'CREATE', tableName: 'transactions', recordId: id,
+    newData: { project_id, category_id, type, amount: parsedAmount, description: description.trim(),
+               vendor, document_number, date, payment_method, notes, invoice_id },
+    ip: getIp(req),
+  });
+
   res.status(201).json({ id });
 });
 
@@ -105,6 +113,8 @@ router.put('/:id', requireRole('admin', 'manager', 'operator'), (req: AuthReques
     return res.status(400).json({ error: 'Descrição inválida' });
   }
 
+  const old = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.id) as any;
+
   db.prepare(`
     UPDATE transactions SET project_id = ?, category_id = ?, type = ?, amount = ?,
       description = ?, vendor = ?, document_number = ?, date = ?, payment_method = ?,
@@ -114,11 +124,29 @@ router.put('/:id', requireRole('admin', 'manager', 'operator'), (req: AuthReques
          document_number || null, date, payment_method || null, notes || null,
          invoice_id || null, req.params.id);
 
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'UPDATE', tableName: 'transactions', recordId: req.params.id,
+    oldData: old ?? null,
+    newData: { project_id, category_id, type, amount: parsedAmount, description: description.trim(),
+               vendor, document_number, date, payment_method, notes, invoice_id },
+    ip: getIp(req),
+  });
+
   res.json({ message: 'Lançamento atualizado' });
 });
 
 router.delete('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
+  const old = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.id) as any;
   db.prepare('DELETE FROM transactions WHERE id = ?').run(req.params.id);
+
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'DELETE', tableName: 'transactions', recordId: req.params.id,
+    oldData: old ?? null,
+    ip: getIp(req),
+  });
+
   res.json({ message: 'Lançamento excluído' });
 });
 

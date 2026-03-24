@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../database';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { logAudit, getIp } from '../middleware/audit';
 
 const router = Router();
 router.use(authenticate);
@@ -28,7 +29,6 @@ router.post('/', requireRole('admin', 'manager'), (req: AuthRequest, res: Respon
     return res.status(400).json({ error: 'Campos obrigatórios faltando' });
   }
 
-  // Upsert: update if exists
   const existing = db.prepare(
     'SELECT id FROM budgets WHERE project_id = ? AND category_id = ? AND (month = ? OR (month IS NULL AND ? IS NULL)) AND (year = ? OR (year IS NULL AND ? IS NULL))'
   ).get(project_id, category_id, month || null, month || null, year || null, year || null) as any;
@@ -36,21 +36,45 @@ router.post('/', requireRole('admin', 'manager'), (req: AuthRequest, res: Respon
   if (existing) {
     db.prepare('UPDATE budgets SET amount = ?, notes = ?, updated_at = datetime("now") WHERE id = ?')
       .run(amount, notes || null, existing.id);
+
+    logAudit({
+      userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+      action: 'UPDATE', tableName: 'budgets', recordId: existing.id,
+      newData: { project_id, category_id, amount, month, year, notes },
+      ip: getIp(req),
+    });
+
     return res.json({ id: existing.id });
   }
 
   const id = uuidv4();
   db.prepare('INSERT INTO budgets (id, project_id, category_id, amount, month, year, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(id, project_id, category_id, amount, month || null, year || null, notes || null);
+
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'CREATE', tableName: 'budgets', recordId: id,
+    newData: { project_id, category_id, amount, month, year, notes },
+    ip: getIp(req),
+  });
+
   res.status(201).json({ id });
 });
 
 router.delete('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
+  const old = db.prepare('SELECT * FROM budgets WHERE id = ?').get(req.params.id) as any;
   db.prepare('DELETE FROM budgets WHERE id = ?').run(req.params.id);
+
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'DELETE', tableName: 'budgets', recordId: req.params.id,
+    oldData: old ?? null,
+    ip: getIp(req),
+  });
+
   res.json({ message: 'Orçamento excluído' });
 });
 
-// Budget vs Actual comparison
 router.get('/comparison', (req: AuthRequest, res: Response) => {
   const { project_id } = req.query;
   const where = project_id ? 'AND t.project_id = ?' : '';

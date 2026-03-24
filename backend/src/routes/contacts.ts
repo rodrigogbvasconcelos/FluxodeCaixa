@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../database';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { logAudit, getIp } from '../middleware/audit';
 
 const router = Router();
 router.use(authenticate);
@@ -49,6 +50,13 @@ router.post('/', requireRole('admin', 'manager'), (req: AuthRequest, res: Respon
          number || null, complement || null, neighborhood || null,
          city || null, state || null, notes || null);
 
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'CREATE', tableName: 'contacts', recordId: id,
+    newData: { name, type, document_type, document_number, phone, email, city, state },
+    ip: getIp(req),
+  });
+
   res.status(201).json({ id });
 });
 
@@ -60,6 +68,8 @@ router.put('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: Resp
     return res.status(400).json({ error: 'Nome e tipo são obrigatórios' });
   }
 
+  const old = db.prepare('SELECT * FROM contacts WHERE id = ?').get(req.params.id) as any;
+
   db.prepare(`
     UPDATE contacts SET name = ?, type = ?, document_type = ?, document_number = ?,
       phone = ?, email = ?, cep = ?, address = ?, number = ?, complement = ?,
@@ -70,11 +80,28 @@ router.put('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: Resp
          number || null, complement || null, neighborhood || null,
          city || null, state || null, notes || null, req.params.id);
 
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'UPDATE', tableName: 'contacts', recordId: req.params.id,
+    oldData: old ?? null,
+    newData: { name, type, document_type, document_number, phone, email, city, state },
+    ip: getIp(req),
+  });
+
   res.json({ message: 'Contato atualizado' });
 });
 
 router.delete('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
+  const old = db.prepare('SELECT * FROM contacts WHERE id = ?').get(req.params.id) as any;
   db.prepare('DELETE FROM contacts WHERE id = ?').run(req.params.id);
+
+  logAudit({
+    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+    action: 'DELETE', tableName: 'contacts', recordId: req.params.id,
+    oldData: old ?? null,
+    ip: getIp(req),
+  });
+
   res.json({ message: 'Contato excluído' });
 });
 
