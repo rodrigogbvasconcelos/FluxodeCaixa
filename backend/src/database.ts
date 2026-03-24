@@ -103,6 +103,26 @@ export function initDatabase() {
       FOREIGN KEY (invoice_id) REFERENCES invoices(id),
       FOREIGN KEY (created_by) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS contacts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('client', 'supplier', 'both')),
+      document_type TEXT CHECK(document_type IN ('cpf', 'cnpj')),
+      document_number TEXT,
+      phone TEXT,
+      email TEXT,
+      cep TEXT,
+      address TEXT,
+      number TEXT,
+      complement TEXT,
+      neighborhood TEXT,
+      city TEXT,
+      state TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Seed default admin user if not exists

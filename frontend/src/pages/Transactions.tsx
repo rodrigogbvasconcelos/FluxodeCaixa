@@ -1,5 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Search, Edit2, Trash2, Filter, FileText, ArrowUpRight, ArrowDownRight, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import {
+  Plus, Search, Edit2, Trash2, Filter, FileText,
+  ArrowUpRight, ArrowDownRight, ChevronLeft, ChevronRight, Paperclip, X
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -8,6 +11,8 @@ import { Transaction, Project, Category } from '../types';
 import Modal from '../components/UI/Modal';
 import ConfirmDialog from '../components/UI/ConfirmDialog';
 import { useAuth } from '../contexts/AuthContext';
+import { BrDateInput, BrCurrencyInput } from '../components/UI/BrInput';
+import { parseBrCurrency } from '../utils/formatters';
 
 const fmtCurrency = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 const fmtDate = (d: string) => { try { return format(new Date(d + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR }); } catch { return d; } };
@@ -35,6 +40,10 @@ export default function Transactions() {
   const [saving, setSaving] = useState(false);
   const [filters, setFilters] = useState({ search: '', project_id: '', type: '', category_id: '', start_date: '', end_date: '' });
   const [showFilters, setShowFilters] = useState(false);
+  // File attachment
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [existingInvoiceName, setExistingInvoiceName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const LIMIT = 20;
 
   const load = useCallback(() => {
@@ -59,9 +68,21 @@ export default function Transactions() {
     api.get('/categories').then(r => setCategories(r.data));
   }, []);
 
+  // Auto-fill client vendor when income and project changes
+  useEffect(() => {
+    if (form.type === 'income' && form.project_id && !editing) {
+      const project = projects.find(p => p.id === form.project_id);
+      if (project?.client) {
+        setForm(f => ({ ...f, vendor: project.client! }));
+      }
+    }
+  }, [form.project_id, form.type, projects, editing]);
+
   const openNew = (type?: 'income' | 'expense') => {
     setEditing(null);
     setForm({ ...emptyForm, type: type || 'expense' });
+    setAttachedFile(null);
+    setExistingInvoiceName('');
     setModalOpen(true);
   };
 
@@ -69,10 +90,12 @@ export default function Transactions() {
     setEditing(t);
     setForm({
       project_id: t.project_id, category_id: t.category_id, type: t.type,
-      amount: String(t.amount), description: t.description, vendor: t.vendor || '',
+      amount: String(t.amount).replace('.', ','), description: t.description, vendor: t.vendor || '',
       document_number: t.document_number || '', date: t.date,
       payment_method: t.payment_method || '', notes: t.notes || '', invoice_id: t.invoice_id || ''
     });
+    setAttachedFile(null);
+    setExistingInvoiceName(t.invoice_name || '');
     setModalOpen(true);
   };
 
@@ -80,7 +103,19 @@ export default function Transactions() {
     e.preventDefault();
     setSaving(true);
     try {
-      const payload = { ...form, amount: parseFloat(form.amount) };
+      let invoiceId = form.invoice_id;
+
+      // Upload file if attached
+      if (attachedFile) {
+        const fd = new FormData();
+        fd.append('invoice', attachedFile);
+        const uploadRes = await api.post('/invoices/upload', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        invoiceId = uploadRes.data.id;
+      }
+
+      const payload = { ...form, amount: parseBrCurrency(form.amount), invoice_id: invoiceId || null };
       if (editing) {
         await api.put(`/transactions/${editing.id}`, payload);
         toast.success('Lançamento atualizado!');
@@ -108,9 +143,15 @@ export default function Transactions() {
     }
   };
 
+  const removeAttachment = () => {
+    setAttachedFile(null);
+    setExistingInvoiceName('');
+    setForm(f => ({ ...f, invoice_id: '' }));
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const filteredCategories = categories.filter(c => c.type === form.type);
   const totalPages = Math.ceil(total / LIMIT);
-
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
 
@@ -156,7 +197,8 @@ export default function Transactions() {
         <div className="flex gap-3 flex-wrap">
           <div className="relative flex-1 min-w-[200px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input placeholder="Buscar..." value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+            <input placeholder="Buscar..." value={filters.search}
+              onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
               className="form-input pl-8 py-2 text-sm" />
           </div>
           <select className="form-input py-2 text-sm min-w-[140px]" value={filters.project_id}
@@ -177,14 +219,16 @@ export default function Transactions() {
         {showFilters && (
           <div className="flex gap-3 flex-wrap mt-3 pt-3 border-t border-gray-100">
             <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-              <span className="text-xs text-gray-500">De:</span>
-              <input type="date" className="form-input py-2 text-sm flex-1" value={filters.start_date}
-                onChange={e => { setFilters(f => ({ ...f, start_date: e.target.value })); setPage(1); }} />
+              <span className="text-xs text-gray-500 whitespace-nowrap">De:</span>
+              <BrDateInput className="form-input py-2 text-sm flex-1"
+                value={filters.start_date}
+                onChange={v => { setFilters(f => ({ ...f, start_date: v })); setPage(1); }} />
             </div>
             <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-              <span className="text-xs text-gray-500">Até:</span>
-              <input type="date" className="form-input py-2 text-sm flex-1" value={filters.end_date}
-                onChange={e => { setFilters(f => ({ ...f, end_date: e.target.value })); setPage(1); }} />
+              <span className="text-xs text-gray-500 whitespace-nowrap">Até:</span>
+              <BrDateInput className="form-input py-2 text-sm flex-1"
+                value={filters.end_date}
+                onChange={v => { setFilters(f => ({ ...f, end_date: v })); setPage(1); }} />
             </div>
             <button onClick={() => { setFilters({ search: '', project_id: '', type: '', category_id: '', start_date: '', end_date: '' }); setPage(1); }}
               className="btn-secondary text-sm py-2 text-red-500">Limpar</button>
@@ -203,7 +247,7 @@ export default function Transactions() {
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Projeto</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Categoria</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Descrição</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Fornecedor</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Fornecedor/Cliente</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Valor</th>
                 {hasRole('admin', 'manager') && <th className="px-4 py-3 w-20"></th>}
               </tr>
@@ -288,11 +332,11 @@ export default function Transactions() {
           {/* Type toggle */}
           {!editing && (
             <div className="flex rounded-lg overflow-hidden border border-gray-200">
-              <button type="button" onClick={() => setForm(f => ({ ...f, type: 'income', category_id: '' }))}
+              <button type="button" onClick={() => setForm(f => ({ ...f, type: 'income', category_id: '', vendor: '' }))}
                 className={`flex-1 py-2 text-sm font-medium transition-colors ${form.type === 'income' ? 'bg-emerald-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
                 ↑ Receita
               </button>
-              <button type="button" onClick={() => setForm(f => ({ ...f, type: 'expense', category_id: '' }))}
+              <button type="button" onClick={() => setForm(f => ({ ...f, type: 'expense', category_id: '', vendor: '' }))}
                 className={`flex-1 py-2 text-sm font-medium transition-colors ${form.type === 'expense' ? 'bg-red-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
                 ↓ Despesa
               </button>
@@ -302,27 +346,32 @@ export default function Transactions() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="form-label">Projeto *</label>
-              <select className="form-input" value={form.project_id} onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))} required>
+              <select className="form-input" value={form.project_id}
+                onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))} required>
                 <option value="">Selecione...</option>
                 {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
             <div>
               <label className="form-label">Categoria *</label>
-              <select className="form-input" value={form.category_id} onChange={e => setForm(f => ({ ...f, category_id: e.target.value }))} required>
+              <select className="form-input" value={form.category_id}
+                onChange={e => setForm(f => ({ ...f, category_id: e.target.value }))} required>
                 <option value="">Selecione...</option>
                 {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
               <label className="form-label">Valor (R$) *</label>
-              <input type="number" step="0.01" min="0.01" className="form-input" value={form.amount}
-                onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} placeholder="0,00" required />
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">R$</span>
+                <BrCurrencyInput className="form-input pl-8" value={form.amount}
+                  onChange={v => setForm(f => ({ ...f, amount: v }))} required />
+              </div>
             </div>
             <div>
               <label className="form-label">Data *</label>
-              <input type="date" className="form-input" value={form.date}
-                onChange={e => setForm(f => ({ ...f, date: e.target.value }))} required />
+              <BrDateInput className="form-input" value={form.date}
+                onChange={v => setForm(f => ({ ...f, date: v }))} required />
             </div>
             <div className="md:col-span-2">
               <label className="form-label">Descrição *</label>
@@ -330,7 +379,12 @@ export default function Transactions() {
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))} required />
             </div>
             <div>
-              <label className="form-label">{form.type === 'income' ? 'Cliente' : 'Fornecedor'}</label>
+              <label className="form-label">
+                {form.type === 'income' ? 'Cliente' : 'Fornecedor'}
+                {form.type === 'income' && form.project_id && projects.find(p => p.id === form.project_id)?.client && (
+                  <span className="text-xs text-emerald-600 ml-1">(do projeto)</span>
+                )}
+              </label>
               <input className="form-input" value={form.vendor}
                 onChange={e => setForm(f => ({ ...f, vendor: e.target.value }))} />
             </div>
@@ -347,6 +401,33 @@ export default function Transactions() {
                 {paymentMethods.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
+
+            {/* File attachment */}
+            <div>
+              <label className="form-label">Anexo (NF / Recibo / Comprovante)</label>
+              {(attachedFile || existingInvoiceName) ? (
+                <div className="flex items-center gap-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                  <FileText size={16} className="text-blue-500 flex-shrink-0" />
+                  <span className="text-sm text-blue-700 flex-1 truncate">
+                    {attachedFile ? attachedFile.name : existingInvoiceName}
+                  </span>
+                  <button type="button" onClick={removeAttachment}
+                    className="text-gray-400 hover:text-red-500 flex-shrink-0">
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex items-center gap-2 cursor-pointer p-2 border-2 border-dashed border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-colors">
+                  <Paperclip size={15} className="text-gray-400" />
+                  <span className="text-sm text-gray-500">Clique para anexar arquivo</span>
+                  <input ref={fileInputRef} type="file" className="hidden"
+                    accept=".pdf,.png,.jpg,.jpeg,.txt"
+                    onChange={e => setAttachedFile(e.target.files?.[0] || null)} />
+                </label>
+              )}
+              <p className="text-xs text-gray-400 mt-1">PDF, PNG, JPG ou TXT (máx. 10MB)</p>
+            </div>
+
             <div className="md:col-span-2">
               <label className="form-label">Observações</label>
               <textarea className="form-input" rows={2} value={form.notes}

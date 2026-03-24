@@ -97,4 +97,23 @@ export interface DashboardData {
   incomeByCategory: Array<{ name: string; color: string; total: number }>;
 }
 
+export interface Contact {
+  id: string;
+  name: string;
+  type: 'client' | 'supplier' | 'both';
+  document_type?: 'cpf' | 'cnpj';
+  document_number?: string;
+  phone?: string;
+  email?: string;
+  cep?: string;
+  address?: string;
+  number?: string;
+  complement?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+  notes?: string;
+  created_at: string;
+}
+
 export type UserRole = 'admin' | 'manager' | 'operator' | 'viewer';
