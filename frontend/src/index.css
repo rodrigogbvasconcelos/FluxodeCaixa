@@ -5,16 +5,22 @@
 @layer base {
   * {
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
   }
   body {
     margin: 0;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     background-color: #f1f5f9;
     color: #1e293b;
+    overscroll-behavior: none;
   }
   #root {
     width: 100%;
     min-height: 100vh;
+    min-height: 100dvh;
   }
 }
 
@@ -49,6 +55,16 @@
   .stat-card {
     @apply bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-start gap-4;
   }
+}
+
+/* Safe area padding for iOS notch/home bar */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Touch-friendly buttons */
+button, a, [role="button"] {
+  touch-action: manipulation;
 }
 
 /* Custom scrollbar */

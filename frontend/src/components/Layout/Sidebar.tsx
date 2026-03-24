@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, FolderOpen, ArrowUpDown, PieChart, Calculator,
   FileText, Upload, Users, ChevronLeft, ChevronRight,
-  HardHat, LogOut, BookUser, Wallet
+  HardHat, LogOut, BookUser, Wallet, X
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import clsx from 'clsx';
@@ -21,32 +21,49 @@ const navItems = [
   { path: '/payables', label: 'Contas a Pagar/Receber', icon: Wallet, roles: ['admin', 'manager', 'operator'] },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const { user, logout, hasRole } = useAuth();
-  const location = useLocation();
 
   const visibleItems = navItems.filter(item => hasRole(...item.roles));
 
   return (
     <div className={clsx(
-      'flex flex-col bg-slate-900 text-white transition-all duration-300 min-h-screen',
-      collapsed ? 'w-16' : 'w-64'
+      'flex flex-col bg-slate-900 text-white transition-all duration-300',
+      // Mobile: fixed overlay drawer; Desktop: relative sidebar
+      'fixed lg:relative inset-y-0 left-0 z-30',
+      'min-h-screen',
+      // Width: always w-64 on mobile; collapsible on desktop
+      'w-64',
+      collapsed && 'lg:w-16',
+      // Mobile show/hide via translate; desktop always visible
+      isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
     )}>
       {/* Logo */}
       <div className={clsx(
         'flex items-center gap-3 p-4 border-b border-slate-700',
-        collapsed ? 'justify-center' : ''
+        collapsed ? 'lg:justify-center' : '',
       )}>
         <div className="w-9 h-9 bg-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
           <HardHat size={20} className="text-white" />
         </div>
-        {!collapsed && (
-          <div>
-            <div className="font-bold text-sm leading-tight">FluxoCaixa</div>
-            <div className="text-xs text-slate-400">Gestão de Obras</div>
-          </div>
-        )}
+        <div className={clsx('flex-1', collapsed && 'lg:hidden')}>
+          <div className="font-bold text-sm leading-tight">FluxoCaixa</div>
+          <div className="text-xs text-slate-400">Gestão de Obras</div>
+        </div>
+        {/* Close button — mobile only */}
+        <button
+          onClick={onClose}
+          className="lg:hidden p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors flex-shrink-0"
+          aria-label="Fechar menu"
+        >
+          <X size={18} />
+        </button>
       </div>
 
       {/* Nav */}
@@ -55,46 +72,46 @@ export default function Sidebar() {
           <NavLink
             key={path}
             to={path}
+            onClick={onClose}
             title={collapsed ? label : undefined}
             className={({ isActive }) => clsx(
-              'flex items-center gap-3 px-4 py-2.5 mx-2 rounded-lg mb-0.5 transition-colors text-sm',
-              collapsed ? 'justify-center px-0 mx-0 rounded-none' : '',
+              'flex items-center gap-3 px-4 py-3 mx-2 rounded-lg mb-0.5 transition-colors text-sm',
+              collapsed ? 'lg:justify-center lg:px-0 lg:mx-0 lg:rounded-none' : '',
               isActive
                 ? 'bg-blue-600 text-white'
                 : 'text-slate-400 hover:bg-slate-800 hover:text-white'
             )}
           >
             <Icon size={18} className="flex-shrink-0" />
-            {!collapsed && <span>{label}</span>}
+            <span className={clsx(collapsed && 'lg:hidden')}>{label}</span>
           </NavLink>
         ))}
       </nav>
 
       {/* User & Collapse */}
       <div className="border-t border-slate-700 p-3">
-        {!collapsed && (
-          <div className="flex items-center gap-2 px-2 py-2 mb-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
-              {user?.name?.charAt(0).toUpperCase()}
-            </div>
-            <div className="overflow-hidden">
-              <div className="text-xs font-medium truncate">{user?.name}</div>
-              <div className="text-xs text-slate-400 truncate capitalize">{user?.role}</div>
-            </div>
+        <div className={clsx('flex items-center gap-2 px-2 py-2 mb-2', collapsed && 'lg:hidden')}>
+          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
+            {user?.name?.charAt(0).toUpperCase()}
           </div>
-        )}
-        <div className={clsx('flex gap-1', collapsed ? 'flex-col items-center' : '')}>
+          <div className="overflow-hidden">
+            <div className="text-xs font-medium truncate">{user?.name}</div>
+            <div className="text-xs text-slate-400 truncate capitalize">{user?.role}</div>
+          </div>
+        </div>
+        <div className={clsx('flex gap-1', collapsed ? 'lg:flex-col lg:items-center' : '')}>
           <button
-            onClick={logout}
+            onClick={() => { logout(); onClose(); }}
             title="Sair"
-            className="flex items-center gap-2 px-2 py-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors text-xs w-full"
+            className="flex items-center gap-2 px-2 py-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors text-xs w-full"
           >
             <LogOut size={15} />
-            {!collapsed && 'Sair'}
+            <span className={clsx(collapsed && 'lg:hidden')}>Sair</span>
           </button>
+          {/* Collapse toggle — desktop only */}
           <button
             onClick={() => setCollapsed(!collapsed)}
-            className="flex items-center gap-2 px-2 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors text-xs ml-auto"
+            className="hidden lg:flex items-center gap-2 px-2 py-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors text-xs ml-auto flex-shrink-0"
             title={collapsed ? 'Expandir' : 'Recolher'}
           >
             {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
