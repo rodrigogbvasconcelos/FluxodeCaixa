@@ -1,19 +1,44 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import db from '../database';
 import { authenticate, AuthRequest, JWT_SECRET_KEY } from '../middleware/auth';
 
 const router = Router();
 
-router.post('/login', (req: Request, res: Response) => {
+// Strict rate limiting for login: 10 attempts / 15 min per IP
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de login. Aguarde 15 minutos.' },
+});
+
+// Validate password strength: ≥8 chars, at least 1 letter and 1 number
+function isStrongPassword(password: string): boolean {
+  if (typeof password !== 'string') return false;
+  if (password.length < 8) return false;
+  if (!/[a-zA-Z]/.test(password)) return false;
+  if (!/[0-9]/.test(password)) return false;
+  return true;
+}
+
+router.post('/login', loginLimiter, (req: Request, res: Response) => {
   const { email, password } = req.body;
-  if (!email || !password) {
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
     return res.status(400).json({ error: 'Email e senha são obrigatórios' });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ? AND active = 1').get(email) as any;
+  // Limit input sizes to avoid DoS via huge bcrypt payloads
+  if (email.length > 254 || password.length > 128) {
+    return res.status(400).json({ error: 'Credenciais inválidas' });
+  }
+
+  const user = db.prepare('SELECT * FROM users WHERE email = ? AND active = 1').get(email.toLowerCase().trim()) as any;
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    // Constant-time-alike: always respond with same error regardless of whether user exists
     return res.status(401).json({ error: 'Credenciais inválidas' });
   }
 
@@ -31,14 +56,27 @@ router.post('/login', (req: Request, res: Response) => {
 
 router.get('/me', authenticate, (req: AuthRequest, res: Response) => {
   const user = db.prepare('SELECT id, name, email, role, created_at FROM users WHERE id = ?').get(req.user!.id) as any;
+  if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
   res.json(user);
 });
 
 router.put('/change-password', authenticate, (req: AuthRequest, res: Response) => {
   const { currentPassword, newPassword } = req.body;
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user!.id) as any;
 
-  if (!bcrypt.compareSync(currentPassword, user.password_hash)) {
+  if (!currentPassword || !newPassword || typeof currentPassword !== 'string' || typeof newPassword !== 'string') {
+    return res.status(400).json({ error: 'Senhas são obrigatórias' });
+  }
+
+  if (currentPassword.length > 128 || newPassword.length > 128) {
+    return res.status(400).json({ error: 'Senha inválida' });
+  }
+
+  if (!isStrongPassword(newPassword)) {
+    return res.status(400).json({ error: 'A nova senha deve ter pelo menos 8 caracteres, incluindo letras e números' });
+  }
+
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user!.id) as any;
+  if (!user || !bcrypt.compareSync(currentPassword, user.password_hash)) {
     return res.status(400).json({ error: 'Senha atual incorreta' });
   }
 

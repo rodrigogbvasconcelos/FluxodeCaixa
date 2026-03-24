@@ -126,12 +126,14 @@ export function initDatabase() {
   `);
 
   // Seed default admin user if not exists
+  // IMPORTANT: Change the default password immediately after first login.
   const adminExists = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@empresa.com');
   if (!adminExists) {
     const { v4: uuidv4 } = require('uuid');
-    const hash = bcrypt.hashSync('admin123', 10);
+    const hash = bcrypt.hashSync('Admin123', 10); // Must be changed on first login
     db.prepare(`INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)`)
       .run(uuidv4(), 'Administrador', 'admin@empresa.com', hash, 'admin');
+    console.warn('[SEGURANÇA] Usuário administrador padrão criado. TROQUE A SENHA IMEDIATAMENTE: admin@empresa.com');
   }
 
   // Seed default categories

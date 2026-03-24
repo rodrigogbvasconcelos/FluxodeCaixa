@@ -6,19 +6,32 @@ import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 const router = Router();
 router.use(authenticate);
 
+const VALID_TYPES = new Set(['income', 'expense']);
+const MAX_PAGE_SIZE = 200;
+
 router.get('/', (req: AuthRequest, res: Response) => {
-  const { project_id, type, category_id, start_date, end_date, page = '1', limit = '50' } = req.query;
+  const { project_id, type, category_id, start_date, end_date } = req.query;
+  const rawPage  = parseInt(String(req.query.page  || '1'),  10);
+  const rawLimit = parseInt(String(req.query.limit || '50'), 10);
+
+  const page  = isNaN(rawPage)  || rawPage  < 1 ? 1  : rawPage;
+  const limit = isNaN(rawLimit) || rawLimit < 1 ? 50 : Math.min(rawLimit, MAX_PAGE_SIZE);
+
+  // Validate type filter if provided
+  if (type && !VALID_TYPES.has(String(type))) {
+    return res.status(400).json({ error: 'Tipo inválido' });
+  }
 
   let where = '1=1';
   const params: any[] = [];
 
-  if (project_id) { where += ' AND t.project_id = ?'; params.push(project_id); }
-  if (type) { where += ' AND t.type = ?'; params.push(type); }
-  if (category_id) { where += ' AND t.category_id = ?'; params.push(category_id); }
-  if (start_date) { where += ' AND t.date >= ?'; params.push(start_date); }
-  if (end_date) { where += ' AND t.date <= ?'; params.push(end_date); }
+  if (project_id)  { where += ' AND t.project_id = ?';   params.push(project_id); }
+  if (type)        { where += ' AND t.type = ?';          params.push(type); }
+  if (category_id) { where += ' AND t.category_id = ?';  params.push(category_id); }
+  if (start_date)  { where += ' AND t.date >= ?';         params.push(start_date); }
+  if (end_date)    { where += ' AND t.date <= ?';         params.push(end_date); }
 
-  const offset = (Number(page) - 1) * Number(limit);
+  const offset = (page - 1) * limit;
 
   const total = (db.prepare(`SELECT COUNT(*) as c FROM transactions t WHERE ${where}`).get(...params) as any).c;
   const rows = db.prepare(`
@@ -33,17 +46,30 @@ router.get('/', (req: AuthRequest, res: Response) => {
     WHERE ${where}
     ORDER BY t.date DESC, t.created_at DESC
     LIMIT ? OFFSET ?
-  `).all(...params, Number(limit), offset);
+  `).all(...params, limit, offset);
 
-  res.json({ data: rows, total, page: Number(page), limit: Number(limit) });
+  res.json({ data: rows, total, page, limit });
 });
 
 router.post('/', requireRole('admin', 'manager', 'operator'), (req: AuthRequest, res: Response) => {
   const { project_id, category_id, type, amount, description, vendor, document_number,
           date, payment_method, notes, invoice_id } = req.body;
 
-  if (!project_id || !category_id || !type || !amount || !description || !date) {
+  if (!project_id || !category_id || !type || amount === undefined || !description || !date) {
     return res.status(400).json({ error: 'Campos obrigatórios faltando' });
+  }
+
+  if (!VALID_TYPES.has(type)) {
+    return res.status(400).json({ error: 'Tipo inválido. Use "income" ou "expense"' });
+  }
+
+  const parsedAmount = parseFloat(amount);
+  if (isNaN(parsedAmount) || parsedAmount < 0) {
+    return res.status(400).json({ error: 'Valor inválido' });
+  }
+
+  if (typeof description !== 'string' || description.trim().length === 0 || description.length > 500) {
+    return res.status(400).json({ error: 'Descrição inválida' });
   }
 
   const id = uuidv4();
@@ -51,7 +77,7 @@ router.post('/', requireRole('admin', 'manager', 'operator'), (req: AuthRequest,
     INSERT INTO transactions (id, project_id, category_id, type, amount, description, vendor,
       document_number, date, payment_method, notes, invoice_id, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, project_id, category_id, type, amount, description, vendor || null,
+  `).run(id, project_id, category_id, type, parsedAmount, description.trim(), vendor || null,
          document_number || null, date, payment_method || null, notes || null,
          invoice_id || null, req.user!.id);
 
@@ -62,12 +88,29 @@ router.put('/:id', requireRole('admin', 'manager', 'operator'), (req: AuthReques
   const { project_id, category_id, type, amount, description, vendor, document_number,
           date, payment_method, notes, invoice_id } = req.body;
 
+  if (!project_id || !category_id || !type || amount === undefined || !description || !date) {
+    return res.status(400).json({ error: 'Campos obrigatórios faltando' });
+  }
+
+  if (!VALID_TYPES.has(type)) {
+    return res.status(400).json({ error: 'Tipo inválido' });
+  }
+
+  const parsedAmount = parseFloat(amount);
+  if (isNaN(parsedAmount) || parsedAmount < 0) {
+    return res.status(400).json({ error: 'Valor inválido' });
+  }
+
+  if (typeof description !== 'string' || description.trim().length === 0 || description.length > 500) {
+    return res.status(400).json({ error: 'Descrição inválida' });
+  }
+
   db.prepare(`
     UPDATE transactions SET project_id = ?, category_id = ?, type = ?, amount = ?,
       description = ?, vendor = ?, document_number = ?, date = ?, payment_method = ?,
       notes = ?, invoice_id = ?, updated_at = datetime('now')
     WHERE id = ?
-  `).run(project_id, category_id, type, amount, description, vendor || null,
+  `).run(project_id, category_id, type, parsedAmount, description.trim(), vendor || null,
          document_number || null, date, payment_method || null, notes || null,
          invoice_id || null, req.params.id);
 
