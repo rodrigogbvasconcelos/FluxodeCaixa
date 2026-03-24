@@ -194,4 +194,17 @@ export function initDatabase() {
   }
 }
 
+/** Flush WAL, close the connection, replace the DB file, and remove leftover WAL artefacts.
+ *  Call this only during a restore operation; the process must restart afterwards. */
+export function closeAndReplaceDb(newDbPath: string) {
+  db.pragma('wal_checkpoint(FULL)');
+  db.close();
+  fs.copyFileSync(newDbPath, DB_PATH);
+  for (const ext of ['-wal', '-shm']) {
+    const f = DB_PATH + ext;
+    if (fs.existsSync(f)) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
+  }
+}
+
+export { DB_PATH };
 export default db;
