@@ -50,6 +50,13 @@ export interface Transaction {
   notes?: string;
   invoice_id?: string;
   invoice_name?: string;
+  due_date?: string;
+  payment_date?: string;
+  status?: 'pending' | 'paid';
+  installments?: number;
+  installment_number?: number;
+  parent_id?: string;
+  is_overdue?: number;
   created_by: string;
   created_by_name?: string;
   created_at: string;

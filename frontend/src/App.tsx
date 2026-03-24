@@ -12,6 +12,7 @@ import InvoiceImport from './pages/InvoiceImport';
 import Users from './pages/Users';
 import Categories from './pages/Categories';
 import Contacts from './pages/Contacts';
+import PayablesReceivables from './pages/PayablesReceivables';
 
 function PrivateRoute({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
   const { isAuthenticated, hasRole } = useAuth();
@@ -58,6 +59,11 @@ function AppRoutes() {
         <Route path="contacts" element={
           <PrivateRoute roles={['admin', 'manager', 'operator']}>
             <Contacts />
+          </PrivateRoute>
+        } />
+        <Route path="payables" element={
+          <PrivateRoute roles={['admin', 'manager', 'operator']}>
+            <PayablesReceivables />
           </PrivateRoute>
         } />
       </Route>

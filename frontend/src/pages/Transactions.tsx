@@ -22,7 +22,8 @@ const paymentMethods = ['Dinheiro', 'PIX', 'Transferência', 'Boleto', 'Cartão 
 const emptyForm = {
   project_id: '', category_id: '', type: 'expense' as 'income' | 'expense',
   amount: '', description: '', vendor: '', document_number: '',
-  date: new Date().toISOString().split('T')[0], payment_method: '', notes: '', invoice_id: ''
+  date: new Date().toISOString().split('T')[0], payment_method: '', notes: '', invoice_id: '',
+  due_date: '', payment_date: '', installments: '1',
 };
 
 export default function Transactions() {
@@ -92,7 +93,8 @@ export default function Transactions() {
       project_id: t.project_id, category_id: t.category_id, type: t.type,
       amount: String(t.amount).replace('.', ','), description: t.description, vendor: t.vendor || '',
       document_number: t.document_number || '', date: t.date,
-      payment_method: t.payment_method || '', notes: t.notes || '', invoice_id: t.invoice_id || ''
+      payment_method: t.payment_method || '', notes: t.notes || '', invoice_id: t.invoice_id || '',
+      due_date: t.due_date || '', payment_date: t.payment_date || '', installments: '1',
     });
     setAttachedFile(null);
     setExistingInvoiceName(t.invoice_name || '');
@@ -115,7 +117,14 @@ export default function Transactions() {
         invoiceId = uploadRes.data.id;
       }
 
-      const payload = { ...form, amount: parseBrCurrency(form.amount), invoice_id: invoiceId || null };
+      const payload = {
+        ...form,
+        amount: parseBrCurrency(form.amount),
+        invoice_id: invoiceId || null,
+        due_date: form.due_date || null,
+        payment_date: form.payment_date || null,
+        installments: parseInt(form.installments) || 1,
+      };
       if (editing) {
         await api.put(`/transactions/${editing.id}`, payload);
         toast.success('Lançamento atualizado!');
@@ -400,6 +409,38 @@ export default function Transactions() {
                 <option value="">Selecione...</option>
                 {paymentMethods.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
+            </div>
+
+            <div>
+              <label className="form-label">Data de Vencimento</label>
+              <BrDateInput className="form-input" value={form.due_date}
+                onChange={v => setForm(f => ({ ...f, due_date: v }))} />
+            </div>
+
+            {!editing && (
+              <div>
+                <label className="form-label">Nº de Parcelas</label>
+                <input type="number" min={1} max={60} className="form-input"
+                  value={form.installments}
+                  onChange={e => setForm(f => ({ ...f, installments: e.target.value }))} />
+                {parseInt(form.installments) > 1 && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    {parseInt(form.installments)}x de {
+                      new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+                        .format(parseBrCurrency(form.amount) / parseInt(form.installments))
+                    } — vencimentos mensais a partir da data de vencimento
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div>
+              <label className="form-label">Data de Pagamento</label>
+              <BrDateInput className="form-input" value={form.payment_date}
+                onChange={v => setForm(f => ({ ...f, payment_date: v }))} />
+              <p className="text-xs text-gray-400 mt-1">
+                Deixe em branco para registrar como conta a {form.type === 'expense' ? 'pagar' : 'receber'}
+              </p>
             </div>
 
             {/* File attachment */}

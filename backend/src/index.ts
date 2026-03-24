@@ -13,6 +13,7 @@ import invoiceRoutes from './routes/invoices';
 import reportRoutes from './routes/reports';
 import contactRoutes from './routes/contacts';
 import auditRoutes from './routes/audit';
+import payablesRoutes from './routes/payables';
 
 // Enforce strong JWT_SECRET in production
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'fluxo-caixa-secret-2024') {
@@ -85,6 +86,7 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/payables', payablesRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', version: '1.0.0' }));
 

@@ -143,6 +143,19 @@ export function initDatabase() {
     );
   `);
 
+  // Migrations: add new columns to existing tables if not present
+  const txMigrations: [string, string][] = [
+    ['due_date',           'ALTER TABLE transactions ADD COLUMN due_date TEXT'],
+    ['payment_date',       'ALTER TABLE transactions ADD COLUMN payment_date TEXT'],
+    ['status',             "ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'paid'"],
+    ['installments',       'ALTER TABLE transactions ADD COLUMN installments INTEGER NOT NULL DEFAULT 1'],
+    ['installment_number', 'ALTER TABLE transactions ADD COLUMN installment_number INTEGER NOT NULL DEFAULT 1'],
+    ['parent_id',          'ALTER TABLE transactions ADD COLUMN parent_id TEXT'],
+  ];
+  for (const [, sql] of txMigrations) {
+    try { db.exec(sql); } catch { /* column already exists */ }
+  }
+
   // Seed default admin user if not exists
   // IMPORTANT: Change the default password immediately after first login.
   const adminExists = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@empresa.com');
