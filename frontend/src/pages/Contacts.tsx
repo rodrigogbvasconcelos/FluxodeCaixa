@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Search, Edit2, Trash2, Users, Building2, UserCheck, MapPin, Phone, Mail, Loader2 } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Users, Building2, UserCheck, MapPin, Phone, Mail, Loader2, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import Modal from '../components/UI/Modal';
@@ -51,6 +51,7 @@ export default function Contacts() {
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
   const [saving, setSaving] = useState(false);
   const [cepLoading, setCepLoading] = useState(false);
+  const [cnpjLoading, setCnpjLoading] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -104,6 +105,54 @@ export default function Contacts() {
       toast.error('Erro ao buscar CEP');
     } finally {
       setCepLoading(false);
+    }
+  };
+
+  const lookupCNPJ = async (cnpj: string) => {
+    const digits = cnpj.replace(/\D/g, '');
+    if (digits.length !== 14) { toast.error('Digite o CNPJ completo (14 dígitos)'); return; }
+    setCnpjLoading(true);
+    try {
+      const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${digits}`);
+      if (!res.ok) { toast.error('CNPJ não encontrado na Receita Federal'); return; }
+      const d = await res.json();
+
+      // Format phone: "11 23851939" → "(11) 23851939"
+      const rawPhone = (d.ddd_telefone_1 || '').replace(/\D/g, '');
+      const phone = rawPhone.length >= 10
+        ? formatPhone(rawPhone)
+        : (d.ddd_telefone_1 || '');
+
+      // Format CEP: "01311902" → "01311-902"
+      const rawCep = (d.cep || '').replace(/\D/g, '');
+      const cep = rawCep.length === 8 ? `${rawCep.slice(0, 5)}-${rawCep.slice(5)}` : (d.cep || '');
+
+      // Build address from tipo + logradouro
+      const logradouro = [d.descricao_tipo_logradouro, d.logradouro].filter(Boolean).join(' ');
+
+      setForm(f => ({
+        ...f,
+        name: f.name || (d.razao_social ?? f.name),
+        phone: phone || f.phone,
+        cep: cep || f.cep,
+        address: logradouro || f.address,
+        number: d.numero || f.number,
+        complement: d.complemento || f.complement,
+        neighborhood: d.bairro || f.neighborhood,
+        city: d.municipio || f.city,
+        state: d.uf || f.state,
+      }));
+
+      // Fill name only if empty
+      if (!form.name && d.razao_social) {
+        setForm(f => ({ ...f, name: d.razao_social }));
+      }
+
+      toast.success('Dados da Receita Federal preenchidos!');
+    } catch {
+      toast.error('Erro ao consultar Receita Federal');
+    } finally {
+      setCnpjLoading(false);
     }
   };
 
@@ -273,17 +322,35 @@ export default function Contacts() {
             </div>
             <div>
               <label className="form-label">{form.document_type === 'cnpj' ? 'CNPJ' : 'CPF'}</label>
-              <input className="form-input font-mono"
-                value={form.document_number}
-                onChange={e => setForm(f => ({
-                  ...f,
-                  document_number: f.document_type === 'cnpj'
-                    ? formatCNPJ(e.target.value)
-                    : formatCPF(e.target.value)
-                }))}
-                placeholder={form.document_type === 'cnpj' ? '00.000.000/0000-00' : '000.000.000-00'}
-                maxLength={form.document_type === 'cnpj' ? 18 : 14}
-              />
+              <div className="flex gap-2">
+                <input className="form-input font-mono flex-1"
+                  value={form.document_number}
+                  onChange={e => setForm(f => ({
+                    ...f,
+                    document_number: f.document_type === 'cnpj'
+                      ? formatCNPJ(e.target.value)
+                      : formatCPF(e.target.value)
+                  }))}
+                  placeholder={form.document_type === 'cnpj' ? '00.000.000/0000-00' : '000.000.000-00'}
+                  maxLength={form.document_type === 'cnpj' ? 18 : 14}
+                />
+                {form.document_type === 'cnpj' && (
+                  <button type="button"
+                    onClick={() => lookupCNPJ(form.document_number)}
+                    disabled={cnpjLoading || form.document_number.replace(/\D/g, '').length !== 14}
+                    title="Consultar Receita Federal"
+                    className="btn-secondary px-3 py-2 disabled:opacity-50 flex-shrink-0">
+                    {cnpjLoading
+                      ? <Loader2 size={15} className="animate-spin" />
+                      : <RefreshCw size={15} />}
+                  </button>
+                )}
+              </div>
+              {form.document_type === 'cnpj' && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Digite o CNPJ completo e clique em <RefreshCw size={10} className="inline" /> para preencher dados da Receita Federal
+                </p>
+              )}
             </div>
 
             {/* Contact */}

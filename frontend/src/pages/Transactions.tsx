@@ -12,6 +12,7 @@ import Modal from '../components/UI/Modal';
 import ConfirmDialog from '../components/UI/ConfirmDialog';
 import { useAuth } from '../contexts/AuthContext';
 import { BrDateInput, BrCurrencyInput } from '../components/UI/BrInput';
+import ContactSearch from '../components/UI/ContactSearch';
 import { parseBrCurrency } from '../utils/formatters';
 
 const fmtCurrency = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
@@ -388,14 +389,14 @@ export default function Transactions() {
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))} required />
             </div>
             <div>
-              <label className="form-label">
-                {form.type === 'income' ? 'Cliente' : 'Fornecedor'}
-                {form.type === 'income' && form.project_id && projects.find(p => p.id === form.project_id)?.client && (
-                  <span className="text-xs text-emerald-600 ml-1">(do projeto)</span>
-                )}
-              </label>
-              <input className="form-input" value={form.vendor}
-                onChange={e => setForm(f => ({ ...f, vendor: e.target.value }))} />
+              <ContactSearch
+                label={form.type === 'income'
+                  ? `Cliente${form.project_id && projects.find(p => p.id === form.project_id)?.client ? ' (do projeto)' : ''}`
+                  : 'Fornecedor'}
+                contactType={form.type === 'income' ? 'client' : 'supplier'}
+                value={form.vendor}
+                onChange={v => setForm(f => ({ ...f, vendor: v }))}
+              />
             </div>
             <div>
               <label className="form-label">Nº Documento / NF</label>
