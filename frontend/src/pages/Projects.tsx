@@ -7,6 +7,7 @@ import api from '../services/api';
 import { Project } from '../types';
 import Modal from '../components/UI/Modal';
 import ConfirmDialog from '../components/UI/ConfirmDialog';
+import ContactSearch from '../components/UI/ContactSearch';
 import { useAuth } from '../contexts/AuthContext';
 
 const fmtCurrency = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
@@ -215,8 +216,13 @@ export default function Projects() {
               <input className="form-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
             </div>
             <div>
-              <label className="form-label">Cliente</label>
-              <input className="form-input" value={form.client} onChange={e => setForm(f => ({ ...f, client: e.target.value }))} />
+              <ContactSearch
+                label="Cliente"
+                contactType="client"
+                value={form.client}
+                onChange={v => setForm(f => ({ ...f, client: v }))}
+                placeholder="Buscar ou digitar cliente..."
+              />
             </div>
             <div>
               <label className="form-label">Status</label>
