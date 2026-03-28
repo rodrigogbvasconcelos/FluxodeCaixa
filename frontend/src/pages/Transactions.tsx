@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Plus, Search, Edit2, Trash2, Filter, FileText,
-  ArrowUpRight, ArrowDownRight, ChevronLeft, ChevronRight, Paperclip, X
+  ArrowUpRight, ArrowDownRight, ChevronLeft, ChevronRight, Paperclip, X,
+  Download, Eye, Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
@@ -46,6 +47,9 @@ export default function Transactions() {
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [existingInvoiceName, setExistingInvoiceName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Invoice preview
+  const [previewInvoice, setPreviewInvoice] = useState<{ name: string; mime?: string; url: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const LIMIT = 20;
 
   const load = useCallback(() => {
@@ -158,6 +162,37 @@ export default function Transactions() {
     setExistingInvoiceName('');
     setForm(f => ({ ...f, invoice_id: '' }));
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const openInvoice = async (invoiceId: string, invoiceName: string) => {
+    if (previewLoading) return;
+    setPreviewLoading(invoiceId);
+    try {
+      const res = await api.get(`/invoices/${invoiceId}/view`, { responseType: 'blob' });
+      const mime = res.headers['content-type'] || '';
+      const blob = new Blob([res.data], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const isPreviewable = mime.includes('pdf') || mime.includes('image');
+      if (isPreviewable) {
+        setPreviewInvoice({ name: invoiceName, mime, url });
+      } else {
+        // Non-previewable: force download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = invoiceName;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    } catch {
+      toast.error('Erro ao carregar arquivo');
+    } finally {
+      setPreviewLoading(null);
+    }
+  };
+
+  const closePreview = () => {
+    if (previewInvoice?.url) URL.revokeObjectURL(previewInvoice.url);
+    setPreviewInvoice(null);
   };
 
   const filteredCategories = categories.filter(c => c.type === form.type);
@@ -285,10 +320,18 @@ export default function Transactions() {
                     </td>
                     <td className="px-4 py-3 text-gray-700 max-w-[200px]">
                       <div className="truncate">{t.description}</div>
-                      {t.invoice_name && (
-                        <div className="flex items-center gap-1 text-xs text-blue-500 mt-0.5">
-                          <FileText size={10} /> {t.invoice_name}
-                        </div>
+                      {t.invoice_name && t.invoice_id && (
+                        <button
+                          onClick={() => openInvoice(t.invoice_id!, t.invoice_name!)}
+                          disabled={previewLoading === t.invoice_id}
+                          title="Visualizar / baixar anexo"
+                          className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 hover:underline mt-0.5 disabled:opacity-50"
+                        >
+                          {previewLoading === t.invoice_id
+                            ? <Loader2 size={10} className="animate-spin" />
+                            : <FileText size={10} />}
+                          {t.invoice_name}
+                        </button>
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-500 max-w-[120px] truncate">{t.vendor || '-'}</td>
@@ -493,6 +536,52 @@ export default function Transactions() {
         message={`Deseja excluir o lançamento "${deleteTarget?.description}"?`}
         confirmLabel="Excluir" danger
       />
+
+      {/* Invoice preview modal */}
+      {previewInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closePreview} />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-fade-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText size={16} className="text-blue-500 flex-shrink-0" />
+                <span className="font-semibold text-gray-900 truncate">{previewInvoice.name}</span>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                <a
+                  href={previewInvoice.url}
+                  download={previewInvoice.name}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <Download size={14} /> Baixar
+                </a>
+                <button onClick={closePreview} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-1 min-h-0">
+              {previewInvoice.mime?.includes('pdf') && (
+                <iframe
+                  src={previewInvoice.url}
+                  className="w-full rounded-lg"
+                  style={{ height: 'calc(90vh - 80px)' }}
+                  title={previewInvoice.name}
+                />
+              )}
+              {previewInvoice.mime?.includes('image') && (
+                <div className="flex items-center justify-center h-full p-4">
+                  <img
+                    src={previewInvoice.url}
+                    alt={previewInvoice.name}
+                    className="max-w-full max-h-[75vh] object-contain rounded-lg shadow"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
