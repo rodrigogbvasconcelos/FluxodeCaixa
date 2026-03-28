@@ -76,32 +76,40 @@ router.post('/upload', uploadLimiter, upload.single('invoice'), async (req: Auth
   res.json({ id, extracted, filename: req.file.originalname });
 });
 
+/** Shared helper: resolve invoice file path and validate it */
+function resolveInvoiceFile(invoice: any): { resolvedPath: string; safeContentType: string; safeName: string } | null {
+  const resolvedPath = path.resolve(path.join(UPLOAD_DIR, path.basename(invoice.file_path)));
+  if ((!resolvedPath.startsWith(UPLOAD_DIR + path.sep) && resolvedPath !== UPLOAD_DIR) || !fs.existsSync(resolvedPath)) {
+    return null;
+  }
+  const safeContentType = ALLOWED_MIME_TYPES[invoice.mime_type] || 'application/octet-stream';
+  const safeName = (invoice.original_name || 'arquivo').replace(/[^\w.\-\s]/g, '_').slice(0, 200);
+  return { resolvedPath, safeContentType, safeName };
+}
+
 router.get('/:id/download', (req: AuthRequest, res: Response) => {
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id) as any;
   if (!invoice) return res.status(404).json({ error: 'Arquivo não encontrado' });
+  const file = resolveInvoiceFile(invoice);
+  if (!file) return res.status(404).json({ error: 'Arquivo não encontrado no disco' });
 
-  // Resolve and verify the file stays inside UPLOAD_DIR (prevent path traversal)
-  const resolvedPath = path.resolve(path.join(UPLOAD_DIR, path.basename(invoice.file_path)));
-  if (!resolvedPath.startsWith(UPLOAD_DIR + path.sep) && resolvedPath !== UPLOAD_DIR) {
-    return res.status(400).json({ error: 'Caminho de arquivo inválido' });
-  }
-
-  if (!fs.existsSync(resolvedPath)) {
-    return res.status(404).json({ error: 'Arquivo não encontrado no disco' });
-  }
-
-  // Use only allow-listed MIME types; never trust what's stored in the DB directly
-  const safeContentType = ALLOWED_MIME_TYPES[invoice.mime_type] || 'application/octet-stream';
-
-  // Sanitize original_name before placing in header
-  const safeName = (invoice.original_name || 'arquivo')
-    .replace(/[^\w.\-\s]/g, '_')
-    .slice(0, 200);
-
-  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeName)}"`);
-  res.setHeader('Content-Type', safeContentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.safeName)}"`);
+  res.setHeader('Content-Type', file.safeContentType);
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.sendFile(resolvedPath);
+  res.sendFile(file.resolvedPath);
+});
+
+/** Serve the file inline (for browser preview of PDFs and images) */
+router.get('/:id/view', (req: AuthRequest, res: Response) => {
+  const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id) as any;
+  if (!invoice) return res.status(404).json({ error: 'Arquivo não encontrado' });
+  const file = resolveInvoiceFile(invoice);
+  if (!file) return res.status(404).json({ error: 'Arquivo não encontrado no disco' });
+
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.safeName)}"`);
+  res.setHeader('Content-Type', file.safeContentType);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.sendFile(file.resolvedPath);
 });
 
 router.get('/:id', (req: AuthRequest, res: Response) => {
