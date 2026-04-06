@@ -17,6 +17,7 @@ export interface Project {
   end_date?: string;
   status: 'active' | 'completed' | 'suspended' | 'archived';
   total_budget: number;
+  progress_pct?: number;
   total_income?: number;
   total_expenses?: number;
   created_by: string;
