@@ -36,20 +36,21 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
 });
 
 router.post('/', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
-  const { name, description, client, address, start_date, end_date, total_budget } = req.body;
+  const { name, description, client, address, start_date, end_date, total_budget, progress_pct } = req.body;
   if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
 
   const id = uuidv4();
+  const safePct = Math.min(100, Math.max(0, Number(progress_pct) || 0));
   db.prepare(`
-    INSERT INTO projects (id, name, description, client, address, start_date, end_date, total_budget, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO projects (id, name, description, client, address, start_date, end_date, total_budget, progress_pct, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, name, description || null, client || null, address || null,
-         start_date || null, end_date || null, total_budget || 0, req.user!.id);
+         start_date || null, end_date || null, total_budget || 0, safePct, req.user!.id);
 
   logAudit({
     userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
     action: 'CREATE', tableName: 'projects', recordId: id,
-    newData: { name, description, client, address, start_date, end_date, total_budget },
+    newData: { name, description, client, address, start_date, end_date, total_budget, progress_pct: safePct },
     ip: getIp(req),
   });
 
@@ -57,16 +58,17 @@ router.post('/', requireRole('admin', 'manager'), (req: AuthRequest, res: Respon
 });
 
 router.put('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
-  const { name, description, client, address, start_date, end_date, status, total_budget } = req.body;
+  const { name, description, client, address, start_date, end_date, status, total_budget, progress_pct } = req.body;
 
   const old = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as any;
+  const safePct = Math.min(100, Math.max(0, Number(progress_pct) || 0));
 
   db.prepare(`
     UPDATE projects SET name = ?, description = ?, client = ?, address = ?,
-    start_date = ?, end_date = ?, status = ?, total_budget = ?, updated_at = datetime('now')
+    start_date = ?, end_date = ?, status = ?, total_budget = ?, progress_pct = ?, updated_at = datetime('now')
     WHERE id = ?
   `).run(name, description || null, client || null, address || null,
-         start_date || null, end_date || null, status || 'active', total_budget || 0, req.params.id);
+         start_date || null, end_date || null, status || 'active', total_budget || 0, safePct, req.params.id);
 
   logAudit({
     userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,

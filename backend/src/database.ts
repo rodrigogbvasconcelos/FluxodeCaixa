@@ -156,6 +156,14 @@ export function initDatabase() {
     try { db.exec(sql); } catch { /* column already exists */ }
   }
 
+  // Projects migrations
+  const projectMigrations: string[] = [
+    'ALTER TABLE projects ADD COLUMN progress_pct REAL NOT NULL DEFAULT 0',
+  ];
+  for (const sql of projectMigrations) {
+    try { db.exec(sql); } catch { /* column already exists */ }
+  }
+
   // Seed default admin user if not exists
   // IMPORTANT: Change the default password immediately after first login.
   const adminExists = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@empresa.com');
