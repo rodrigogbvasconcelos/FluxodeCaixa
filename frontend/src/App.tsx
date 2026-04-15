@@ -10,6 +10,7 @@ import Budgets from './pages/Budgets';
 import Reports from './pages/Reports';
 import InvoiceImport from './pages/InvoiceImport';
 import Users from './pages/Users';
+import Audit from './pages/Audit';
 import Categories from './pages/Categories';
 import Contacts from './pages/Contacts';
 import PayablesReceivables from './pages/PayablesReceivables';
@@ -50,6 +51,11 @@ function AppRoutes() {
         <Route path="users" element={
           <PrivateRoute roles={['admin']}>
             <Users />
+          </PrivateRoute>
+        } />
+        <Route path="audit" element={
+          <PrivateRoute roles={['admin']}>
+            <Audit />
           </PrivateRoute>
         } />
         <Route path="categories" element={

@@ -3,7 +3,7 @@ import { Download, FileSpreadsheet, FileText as FilePdf, Filter, BarChart2, Tren
 import toast from 'react-hot-toast';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, LineChart, Line
+  PieChart, Pie, Cell, Legend, LineChart, Line, ComposedChart, ReferenceLine
 } from 'recharts';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -14,14 +14,21 @@ import { exportToExcel, exportToPDF, exportBudgetComparisonToExcel } from '../se
 const fmtCurrency = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 const fmtCompact = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', notation: 'compact' }).format(v);
 const fmtMonth = (m: string) => { try { return format(new Date(m + '-01'), 'MMM/yy', { locale: ptBR }); } catch { return m; } };
+const fmtDate = (value?: string) => {
+  if (!value) return '-';
+  try { return format(new Date(value + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR }); } catch { return value; }
+};
 
 export default function Reports() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [budgetData, setBudgetData] = useState<any[]>([]);
+  const [financialData, setFinancialData] = useState<any[]>([]);
+  const [forecastData, setForecastData] = useState<any[]>([]);
+  const [forecastSummary, setForecastSummary] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'cash-flow' | 'budget'>('cash-flow');
+  const [tab, setTab] = useState<'cash-flow' | 'budget' | 'financial' | 'forecast'>('cash-flow');
   const [filters, setFilters] = useState({
     project_id: '', type: '', start_date: '', end_date: ''
   });
@@ -51,10 +58,36 @@ export default function Reports() {
     api.get('/reports/budget-comparison', { params }).then(r => setBudgetData(r.data)).finally(() => setLoading(false));
   }, [filters.project_id]);
 
+  const loadFinancialReport = useCallback(() => {
+    setLoading(true);
+    const params: any = {};
+    if (filters.project_id) params.project_id = filters.project_id;
+    api.get('/reports/physical-financial', { params }).then(r => setFinancialData(r.data)).finally(() => setLoading(false));
+  }, [filters.project_id]);
+
+  const loadForecastReport = useCallback(() => {
+    setLoading(true);
+    const params: any = {};
+    if (filters.project_id) params.project_id = filters.project_id;
+    api.get('/reports/forecast', { params }).then(r => {
+      setForecastData(r.data.forecast || []);
+      setForecastSummary({
+        avgIncome: r.data.avgIncome,
+        avgExpense: r.data.avgExpense,
+        totalPendingIncome: r.data.totalPendingIncome,
+        totalPendingExpense: r.data.totalPendingExpense,
+        overdue: r.data.overdue,
+        pendingList: r.data.pendingList || [],
+      });
+    }).finally(() => setLoading(false));
+  }, [filters.project_id]);
+
   useEffect(() => {
     if (tab === 'cash-flow') loadReport();
-    else loadBudgetReport();
-  }, [tab, loadReport, loadBudgetReport]);
+    else if (tab === 'budget') loadBudgetReport();
+    else if (tab === 'financial') loadFinancialReport();
+    else loadForecastReport();
+  }, [tab, loadReport, loadBudgetReport, loadFinancialReport, loadForecastReport]);
 
   const handleExcelExport = async () => {
     if (tab === 'cash-flow') {
@@ -63,7 +96,7 @@ export default function Reports() {
         balance: summary.total_income - summary.total_expenses
       } : undefined);
       toast.success('Excel exportado!');
-    } else {
+    } else if (tab === 'budget') {
       await exportBudgetComparisonToExcel(budgetData, 'comparativo_orcamento');
       toast.success('Excel exportado!');
     }
@@ -71,14 +104,38 @@ export default function Reports() {
 
   const handlePDFExport = () => {
     const project = projects.find(p => p.id === filters.project_id);
-    exportToPDF(transactions, 'Relatório de Fluxo de Caixa',
-      summary ? { totalIncome: summary.total_income, totalExpenses: summary.total_expenses, balance: summary.total_income - summary.total_expenses } : undefined,
-      project?.name
-    );
-    toast.success('PDF exportado!');
+    if (tab === 'cash-flow') {
+      exportToPDF(transactions, 'Relatório de Fluxo de Caixa',
+        summary ? { totalIncome: summary.total_income, totalExpenses: summary.total_expenses, balance: summary.total_income - summary.total_expenses } : undefined,
+        project?.name
+      );
+      toast.success('PDF exportado!');
+    }
   };
 
-  // Build monthly data from transactions
+  const forecastChartData = forecastData.map((item: any) => ({
+    month: fmtMonth(item.month), income: item.income, expense: item.expense
+  }));
+
+  let cumulated = 0;
+  const forecastTrendData = forecastData.map((item: any) => {
+    const balance = (item.income || 0) - (item.expense || 0);
+    cumulated += balance;
+    return {
+      month: fmtMonth(item.month),
+      income: item.income,
+      expense: item.expense,
+      balance,
+      cumulativeBalance: cumulated,
+    };
+  });
+
+  const forecastTotalIncome = forecastData.reduce((sum: number, item: any) => sum + (item.income || 0), 0);
+  const forecastTotalExpense = forecastData.reduce((sum: number, item: any) => sum + (item.expense || 0), 0);
+  const forecastNet = forecastTotalIncome - forecastTotalExpense;
+  const bestForecastMonth = forecastTrendData.reduce((best: any, item: any) => !best || item.balance > best.balance ? item : best, null);
+  const worstForecastMonth = forecastTrendData.reduce((worst: any, item: any) => !worst || item.balance < worst.balance ? item : worst, null);
+
   const monthlyMap: Record<string, { income: number; expense: number }> = {};
   transactions.forEach(t => {
     const m = t.date.slice(0, 7);
@@ -90,7 +147,6 @@ export default function Reports() {
     month: fmtMonth(month), ...v, balance: v.income - v.expense
   }));
 
-  // Category breakdown
   const catMap: Record<string, { name: string; color: string; income: number; expense: number }> = {};
   transactions.forEach(t => {
     if (!catMap[t.category_id]) catMap[t.category_id] = { name: t.category_name || '', color: t.category_color || '#6B7280', income: 0, expense: 0 };
@@ -108,9 +164,11 @@ export default function Reports() {
           <p className="text-gray-500 text-sm">Análise detalhada do fluxo financeiro</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={handleExcelExport} className="btn-success text-sm">
-            <FileSpreadsheet size={15} /> Excel
-          </button>
+          {(tab === 'cash-flow' || tab === 'budget') && (
+            <button onClick={handleExcelExport} className="btn-success text-sm">
+              <FileSpreadsheet size={15} /> Excel
+            </button>
+          )}
           {tab === 'cash-flow' && (
             <button onClick={handlePDFExport} className="btn-danger text-sm">
               <FilePdf size={15} /> PDF
@@ -119,11 +177,12 @@ export default function Reports() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-gray-200">
+      <div className="flex flex-wrap border-b border-gray-200 gap-1">
         {[
           { key: 'cash-flow', label: 'Fluxo de Caixa' },
           { key: 'budget', label: 'Orçado vs Realizado' },
+          { key: 'financial', label: 'Físico-Financeiro' },
+          { key: 'forecast', label: 'Previsão' },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key as any)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
@@ -134,7 +193,6 @@ export default function Reports() {
         ))}
       </div>
 
-      {/* Filters */}
       <div className="card p-4">
         <div className="flex gap-3 flex-wrap">
           <select className="form-input py-2 text-sm min-w-[180px]" value={filters.project_id}
@@ -165,9 +223,8 @@ export default function Reports() {
         <div className="text-center py-16 text-gray-400">Carregando relatório...</div>
       ) : tab === 'cash-flow' ? (
         <>
-          {/* Summary cards */}
           {summary && (
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
               <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
                 <div className="flex items-center gap-2 text-emerald-600 mb-1">
                   <TrendingUp size={18} />
@@ -195,7 +252,6 @@ export default function Reports() {
             </div>
           )}
 
-          {/* Monthly chart */}
           {monthlyData.length > 0 && (
             <div className="card">
               <h3 className="font-semibold text-gray-900 mb-4">Evolução Mensal</h3>
@@ -214,7 +270,6 @@ export default function Reports() {
             </div>
           )}
 
-          {/* Category charts */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
             <div className="card">
               <h3 className="font-semibold text-gray-900 mb-4">Despesas por Categoria</h3>
@@ -250,7 +305,6 @@ export default function Reports() {
             </div>
           </div>
 
-          {/* Transactions table */}
           {transactions.length > 0 && (
             <div className="card p-0 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-100">
@@ -270,7 +324,7 @@ export default function Reports() {
                   <tbody className="divide-y divide-gray-50">
                     {transactions.map(t => (
                       <tr key={t.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{t.date}</td>
+                        <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(t.date)}</td>
                         <td className="px-4 py-2.5 text-gray-700">{t.project_name}</td>
                         <td className="px-4 py-2.5">
                           <span className="flex items-center gap-1.5 text-xs">
@@ -290,8 +344,7 @@ export default function Reports() {
             </div>
           )}
         </>
-      ) : (
-        /* Budget comparison tab */
+      ) : tab === 'budget' ? (
         <div className="space-y-5">
           {budgetData.length === 0 ? (
             <div className="card text-center py-16 text-gray-400">Nenhum dado de orçamento encontrado</div>
@@ -369,6 +422,167 @@ export default function Reports() {
               </table>
             </div>
           ))}
+        </div>
+      ) : tab === 'financial' ? (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="bg-slate-50 border border-slate-100 rounded-xl p-4">
+              <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Receitas acumuladas</div>
+              <div className="text-2xl font-bold text-emerald-700">{fmtCurrency(financialData.reduce((sum, item) => sum + (item.total_income || 0), 0))}</div>
+            </div>
+            <div className="bg-slate-50 border border-slate-100 rounded-xl p-4">
+              <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Despesas acumuladas</div>
+              <div className="text-2xl font-bold text-red-700">{fmtCurrency(financialData.reduce((sum, item) => sum + (item.total_expenses || 0), 0))}</div>
+            </div>
+            <div className="bg-slate-50 border border-slate-100 rounded-xl p-4">
+              <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Orçamento previsto</div>
+              <div className="text-2xl font-bold text-blue-700">{fmtCurrency(financialData.reduce((sum, item) => sum + (item.total_budgeted || 0), 0))}</div>
+            </div>
+            <div className="bg-slate-50 border border-slate-100 rounded-xl p-4">
+              <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Pendências</div>
+              <div className="text-2xl font-bold text-orange-700">{fmtCurrency(financialData.reduce((sum, item) => sum + (item.pending_expenses || 0) + (item.pending_income || 0), 0))}</div>
+            </div>
+          </div>
+
+          {financialData.length === 0 ? (
+            <div className="card text-center py-16 text-gray-400">Nenhum projeto encontrado</div>
+          ) : (
+            <div className="card overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Projeto</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Orçamento</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Receitas</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Despesas</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Pendências</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Vencidas</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Burn Rate</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">CPI</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {financialData.map((proj: any) => (
+                    <tr key={proj.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-gray-700">{proj.name}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{fmtCurrency(proj.total_budgeted || 0)}</td>
+                      <td className="px-4 py-3 text-right text-emerald-700">{fmtCurrency(proj.total_income || 0)}</td>
+                      <td className="px-4 py-3 text-right text-red-700">{fmtCurrency(proj.total_expenses || 0)}</td>
+                      <td className="px-4 py-3 text-right text-orange-700">{fmtCurrency((proj.pending_expenses || 0) + (proj.pending_income || 0))}</td>
+                      <td className="px-4 py-3 text-right text-orange-700">{fmtCurrency(proj.overdue_expenses || 0)}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{proj.burnRate ? `${proj.burnRate.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}` : '-'} /mês</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{proj.cpi ? proj.cpi.toFixed(2) : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+              <div className="text-xs text-emerald-600 uppercase tracking-wide mb-2">Média receitas 6m</div>
+              <div className="text-2xl font-bold text-emerald-700">{fmtCurrency(forecastSummary?.avgIncome || 0)}</div>
+            </div>
+            <div className="bg-red-50 border border-red-100 rounded-xl p-4">
+              <div className="text-xs text-red-600 uppercase tracking-wide mb-2">Média despesas 6m</div>
+              <div className="text-2xl font-bold text-red-700">{fmtCurrency(forecastSummary?.avgExpense || 0)}</div>
+            </div>
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+              <div className="text-xs text-blue-600 uppercase tracking-wide mb-2">Total a receber</div>
+              <div className="text-2xl font-bold text-blue-700">{fmtCurrency(forecastSummary?.totalPendingIncome || 0)}</div>
+            </div>
+            <div className="bg-orange-50 border border-orange-100 rounded-xl p-4">
+              <div className="text-xs text-orange-600 uppercase tracking-wide mb-2">Total a pagar</div>
+              <div className="text-2xl font-bold text-orange-700">{fmtCurrency(forecastSummary?.totalPendingExpense || 0)}</div>
+            </div>
+          </div>
+
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+              <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+                <div className="text-xs text-emerald-600 uppercase tracking-wide mb-2">Receita prevista</div>
+                <div className="text-2xl font-bold text-emerald-700">{fmtCurrency(forecastTotalIncome)}</div>
+              </div>
+              <div className="bg-red-50 border border-red-100 rounded-xl p-4">
+                <div className="text-xs text-red-600 uppercase tracking-wide mb-2">Despesa prevista</div>
+                <div className="text-2xl font-bold text-red-700">{fmtCurrency(forecastTotalExpense)}</div>
+              </div>
+              <div className={`bg-blue-50 border border-blue-100 rounded-xl p-4`}> 
+                <div className="text-xs text-blue-600 uppercase tracking-wide mb-2">Saldo líquido previsto</div>
+                <div className="text-2xl font-bold text-blue-700">{fmtCurrency(forecastNet)}</div>
+              </div>
+              <div className="bg-slate-50 border border-slate-100 rounded-xl p-4">
+                <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Mês melhor / pior</div>
+                <div className="text-sm text-gray-700">{bestForecastMonth ? `${bestForecastMonth.month} +${fmtCurrency(bestForecastMonth.balance)}` : '-'}</div>
+                <div className="text-sm text-gray-500">{worstForecastMonth ? `${worstForecastMonth.month} ${fmtCurrency(worstForecastMonth.balance)}` : ''}</div>
+              </div>
+            </div>
+
+            <div className="card">
+              <h3 className="font-semibold text-gray-900 mb-4">Previsão por mês</h3>
+              {forecastTrendData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={340}>
+                  <ComposedChart data={forecastTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                    <YAxis tickFormatter={fmtCompact} tick={{ fontSize: 11 }} />
+                    <Tooltip formatter={(value: number) => fmtCurrency(value)} />
+                    <Legend />
+                    <Bar dataKey="income" name="Receitas" fill="#10b981" />
+                    <Bar dataKey="expense" name="Despesas" fill="#ef4444" />
+                    <Line type="monotone" dataKey="balance" name="Saldo Líquido" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="cumulativeBalance" name="Saldo Acumulado" stroke="#8b5cf6" strokeWidth={2} strokeDasharray="4 3" dot={false} />
+                    <ReferenceLine y={0} stroke="#9ca3af" strokeDasharray="3 3" />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="text-center py-16 text-gray-400">Nenhum dado de previsão disponível</div>
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-semibold text-gray-900">Contas pendentes</h3>
+                <p className="text-xs text-gray-500">Últimos lançamentos pendentes com vencimento</p>
+              </div>
+              <div className="text-xs text-gray-500">
+                Vencidas: {forecastSummary?.overdue?.count || 0} | Valor: {fmtCurrency(forecastSummary?.overdue?.expense || 0)}
+              </div>
+            </div>
+            {forecastSummary?.pendingList?.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Data</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Projeto</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Categoria</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Descrição</th>
+                      <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {forecastSummary.pendingList.map((item: any) => (
+                      <tr key={item.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{fmtDate(item.due_date)}</td>
+                        <td className="px-4 py-3 text-gray-700">{item.project_name}</td>
+                        <td className="px-4 py-3 text-gray-700">{item.category_name}</td>
+                        <td className="px-4 py-3 text-gray-700">{item.description}</td>
+                        <td className="px-4 py-3 text-right font-medium text-red-600">{fmtCurrency(item.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-16 text-gray-400">Nenhuma conta pendente encontrada</div>
+            )}
+          </div>
         </div>
       )}
     </div>
