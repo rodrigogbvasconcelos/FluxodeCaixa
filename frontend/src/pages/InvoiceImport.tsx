@@ -118,6 +118,19 @@ export default function InvoiceImport() {
   };
 
   const filteredCategories = categories.filter(c => c.type === form.type);
+
+  const buildCategoryOptions = (cats: Category[], parentId?: string, level = 0): Category[] => {
+    const result: Category[] = [];
+    cats
+      .filter(c => c.parent_id === parentId)
+      .forEach(cat => {
+        result.push({ ...cat, name: '  '.repeat(level) + cat.name });
+        result.push(...buildCategoryOptions(cats, cat.id, level + 1));
+      });
+    return result;
+  };
+
+  const categoryOptions = buildCategoryOptions(filteredCategories);
   const paymentMethods = ['Dinheiro', 'PIX', 'Transferência', 'Boleto', 'Cartão de Débito', 'Cartão de Crédito', 'Cheque'];
 
   return (
@@ -256,7 +269,7 @@ export default function InvoiceImport() {
                   <select className="form-input text-sm" value={form.category_id}
                     onChange={e => setForm(f => ({ ...f, category_id: e.target.value }))} required>
                     <option value="">Selecione...</option>
-                    {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {categoryOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
               </div>

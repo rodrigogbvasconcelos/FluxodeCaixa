@@ -41,6 +41,20 @@ export default function Budgets() {
   const expenseCategories = categories.filter(c => c.type === 'expense');
   const incomeCategories = categories.filter(c => c.type === 'income');
 
+  const buildCategoryHierarchy = (cats: Category[], parentId?: string, level = 0): (Category & { level: number })[] => {
+    const result: (Category & { level: number })[] = [];
+    cats
+      .filter(c => c.parent_id === parentId)
+      .forEach(cat => {
+        result.push({ ...cat, level });
+        result.push(...buildCategoryHierarchy(cats, cat.id, level + 1));
+      });
+    return result;
+  };
+
+  const expenseHierarchy = buildCategoryHierarchy(expenseCategories);
+  const incomeHierarchy = buildCategoryHierarchy(incomeCategories);
+
   const handleSave = async () => {
     if (!selectedProject) return;
     setSaving(true);
@@ -120,7 +134,7 @@ export default function Budgets() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {expenseCategories.map(cat => {
+              {expenseHierarchy.map(cat => {
                 const budget = budgets.find(b => b.category_id === cat.id);
                 const actual = comparison.find(c => c.id === cat.id)?.actual || 0;
                 const budgetVal = parseBrCurrency(budgetAmounts[cat.id] || '0');
@@ -128,7 +142,7 @@ export default function Budgets() {
                 const overBudget = actual > budgetVal && budgetVal > 0;
 
                 return (
-                  <div key={cat.id} className="border border-gray-100 rounded-xl p-3 hover:border-gray-200 transition-colors">
+                  <div key={cat.id} className={`border border-gray-100 rounded-xl p-3 hover:border-gray-200 transition-colors ${cat.level > 0 ? 'ml-6' : ''}`}>
                     <div className="flex items-center gap-2 mb-2">
                       <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: cat.color }} />
                       <span className="text-sm font-medium text-gray-800 flex-1">{cat.name}</span>

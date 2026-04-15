@@ -12,19 +12,19 @@ router.get('/', (req: AuthRequest, res: Response) => {
 });
 
 router.post('/', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
-  const { name, type, color, icon } = req.body;
+  const { name, type, color, icon, parent_id } = req.body;
   if (!name || !type) return res.status(400).json({ error: 'Nome e tipo são obrigatórios' });
 
   const id = uuidv4();
-  db.prepare('INSERT INTO categories (id, name, type, color, icon) VALUES (?, ?, ?, ?, ?)')
-    .run(id, name, type, color || '#6B7280', icon || 'tag');
+  db.prepare('INSERT INTO categories (id, name, type, color, icon, parent_id) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, name, type, color || '#6B7280', icon || 'tag', parent_id || null);
   res.status(201).json({ id, name, type });
 });
 
 router.put('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
-  const { name, color, icon } = req.body;
-  db.prepare('UPDATE categories SET name = ?, color = ?, icon = ? WHERE id = ? AND is_default = 0')
-    .run(name, color, icon, req.params.id);
+  const { name, color, icon, parent_id } = req.body;
+  db.prepare('UPDATE categories SET name = ?, color = ?, icon = ?, parent_id = ? WHERE id = ? AND is_default = 0')
+    .run(name, color, icon, parent_id || null, req.params.id);
   res.json({ message: 'Categoria atualizada' });
 });
 
