@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, FolderOpen, ArrowUpDown, PieChart, Calculator,
   FileText, Upload, Users, ChevronLeft, ChevronRight,
-  HardHat, LogOut, BookUser, Wallet, X, DatabaseBackup
+  HardHat, LogOut, BookUser, Wallet, X, DatabaseBackup, ClipboardList
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import clsx from 'clsx';
@@ -16,6 +16,7 @@ const navItems = [
   { path: '/reports', label: 'Relatórios', icon: FileText, roles: ['admin', 'manager', 'operator', 'viewer'] },
   { path: '/invoice-import', label: 'Importar NF', icon: Upload, roles: ['admin', 'manager', 'operator'] },
   { path: '/users', label: 'Usuários', icon: Users, roles: ['admin'] },
+  { path: '/audit', label: 'Auditoria', icon: ClipboardList, roles: ['admin'] },
   { path: '/categories', label: 'Categorias', icon: PieChart, roles: ['admin', 'manager'] },
   { path: '/contacts', label: 'Contatos', icon: BookUser, roles: ['admin', 'manager', 'operator'] },
   { path: '/payables', label: 'Contas a Pagar/Receber', icon: Wallet, roles: ['admin', 'manager', 'operator'] },

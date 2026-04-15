@@ -63,6 +63,17 @@ export interface Transaction {
   created_at: string;
 }
 
+export interface AuditLog {
+  id: string;
+  user_id: string;
+  action: string;
+  table_name?: string;
+  record_id?: string;
+  old_value?: string;
+  new_value?: string;
+  created_at: string;
+}
+
 export interface Budget {
   id: string;
   project_id: string;
