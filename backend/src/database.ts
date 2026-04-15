@@ -53,7 +53,9 @@ export function initDatabase() {
       color TEXT NOT NULL DEFAULT '#6B7280',
       icon TEXT NOT NULL DEFAULT 'tag',
       is_default INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      parent_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (parent_id) REFERENCES categories(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS budgets (

@@ -32,6 +32,7 @@ export interface Category {
   color: string;
   icon: string;
   is_default: number;
+  parent_id?: string;
 }
 
 export interface Transaction {

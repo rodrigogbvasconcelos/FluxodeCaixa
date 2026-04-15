@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Edit2, Trash2, Tag } from 'lucide-react';
+import { Plus, Edit2, Trash2, Tag, ChevronRight, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import { Category } from '../types';
@@ -12,7 +12,7 @@ const COLORS = [
   '#14B8A6', '#F59E0B', '#6366F1', '#64748B', '#DC2626',
 ];
 
-const emptyForm = { name: '', type: 'expense' as 'income' | 'expense', color: '#3B82F6', icon: 'tag' };
+const emptyForm = { name: '', type: 'expense' as 'income' | 'expense', color: '#3B82F6', icon: 'tag', parent_id: '' };
 
 export default function Categories() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -23,22 +23,33 @@ export default function Categories() {
   const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<'expense' | 'income'>('expense');
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   const load = () => {
     api.get('/categories').then(r => setCategories(r.data)).finally(() => setLoading(false));
   };
   useEffect(load, []);
 
-  const openNew = (type: 'income' | 'expense') => {
+  const openNew = (type: 'income' | 'expense', parentId?: string) => {
     setEditing(null);
-    setForm({ ...emptyForm, type });
+    setForm({ ...emptyForm, type, parent_id: parentId || '' });
     setModalOpen(true);
   };
 
   const openEdit = (c: Category) => {
     setEditing(c);
-    setForm({ name: c.name, type: c.type, color: c.color, icon: c.icon });
+    setForm({ name: c.name, type: c.type, color: c.color, icon: c.icon, parent_id: c.parent_id || '' });
     setModalOpen(true);
+  };
+
+  const toggleExpanded = (categoryId: string) => {
+    const newExpanded = new Set(expandedCategories);
+    if (newExpanded.has(categoryId)) {
+      newExpanded.delete(categoryId);
+    } else {
+      newExpanded.add(categoryId);
+    }
+    setExpandedCategories(newExpanded);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -72,7 +83,83 @@ export default function Categories() {
     }
   };
 
+  // Build hierarchical structure
+  const buildCategoryTree = (cats: Category[]) => {
+    const parentMap = new Map<string, Category[]>();
+    const parents: Category[] = [];
+
+    cats.forEach(cat => {
+      if (cat.parent_id) {
+        if (!parentMap.has(cat.parent_id)) {
+          parentMap.set(cat.parent_id, []);
+        }
+        parentMap.get(cat.parent_id)!.push(cat);
+      } else {
+        parents.push(cat);
+      }
+    });
+
+    return parents.map(parent => ({
+      ...parent,
+      children: parentMap.get(parent.id) || []
+    }));
+  };
+
   const shown = categories.filter(c => c.type === tab);
+  const categoryTree = buildCategoryTree(shown);
+
+  const renderCategoryItem = (category: Category & { children?: Category[] }, level = 0) => {
+    const hasChildren = category.children && category.children.length > 0;
+    const isExpanded = expandedCategories.has(category.id);
+
+    return (
+      <div key={category.id}>
+        <div className={`card hover:shadow-md transition-shadow p-4 ${level > 0 ? 'ml-6 border-l-4 border-gray-200' : ''}`}>
+          <div className="flex items-center gap-3 mb-3">
+            {hasChildren && (
+              <button
+                onClick={() => toggleExpanded(category.id)}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              </button>
+            )}
+            {!hasChildren && <div className="w-6" />}
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg"
+              style={{ background: category.color }}>
+              <Tag size={18} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-gray-900 truncate">{category.name}</div>
+              {category.is_default ? (
+                <span className="text-xs text-gray-400">Padrão</span>
+              ) : (
+                <span className="text-xs text-blue-500">Personalizada</span>
+              )}
+            </div>
+          </div>
+          {!category.is_default && (
+            <div className="flex gap-2">
+              <button onClick={() => openNew(category.type, category.id)} className="flex-1 btn-secondary text-xs py-1.5 justify-center">
+                <Plus size={12} /> Subitem
+              </button>
+              <button onClick={() => openEdit(category)} className="flex-1 btn-secondary text-xs py-1.5 justify-center">
+                <Edit2 size={12} /> Editar
+              </button>
+              <button onClick={() => setDeleteTarget(category)} className="flex-1 btn-danger text-xs py-1.5 justify-center">
+                <Trash2 size={12} /> Excluir
+              </button>
+            </div>
+          )}
+        </div>
+        {hasChildren && isExpanded && (
+          <div className="ml-6">
+            {category.children!.map(child => renderCategoryItem(child, level + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -110,35 +197,8 @@ export default function Categories() {
           <button onClick={() => openNew(tab)} className="btn-primary mx-auto"><Plus size={15} /> Adicionar</button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {shown.map(cat => (
-            <div key={cat.id} className="card hover:shadow-md transition-shadow p-4">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg"
-                  style={{ background: cat.color }}>
-                  <Tag size={18} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-gray-900 truncate">{cat.name}</div>
-                  {cat.is_default ? (
-                    <span className="text-xs text-gray-400">Padrão</span>
-                  ) : (
-                    <span className="text-xs text-blue-500">Personalizada</span>
-                  )}
-                </div>
-              </div>
-              {!cat.is_default && (
-                <div className="flex gap-2">
-                  <button onClick={() => openEdit(cat)} className="flex-1 btn-secondary text-xs py-1.5 justify-center">
-                    <Edit2 size={12} /> Editar
-                  </button>
-                  <button onClick={() => setDeleteTarget(cat)} className="flex-1 btn-danger text-xs py-1.5 justify-center">
-                    <Trash2 size={12} /> Excluir
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+        <div className="space-y-3">
+          {categoryTree.map(cat => renderCategoryItem(cat))}
         </div>
       )}
 
@@ -162,6 +222,23 @@ export default function Categories() {
               </button>
             </div>
           </div>
+          {!editing && (
+            <div>
+              <label className="form-label">Categoria Pai (opcional)</label>
+              <select
+                className="form-input"
+                value={form.parent_id}
+                onChange={e => setForm(f => ({ ...f, parent_id: e.target.value }))}
+              >
+                <option value="">Nenhuma (categoria principal)</option>
+                {categories
+                  .filter(c => c.type === form.type && !c.parent_id)
+                  .map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="form-label">Cor</label>
             <div className="flex flex-wrap gap-2">
