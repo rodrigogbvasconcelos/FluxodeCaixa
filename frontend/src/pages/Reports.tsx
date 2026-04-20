@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Download, FileSpreadsheet, FileText as FilePdf, Filter, BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
+import { FileSpreadsheet, FileText as FilePdf, BarChart2, TrendingUp, TrendingDown, AlertCircle, Package, Users, CreditCard } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -27,8 +27,9 @@ export default function Reports() {
   const [financialData, setFinancialData] = useState<any[]>([]);
   const [forecastData, setForecastData] = useState<any[]>([]);
   const [forecastSummary, setForecastSummary] = useState<any>(null);
+  const [analyticalData, setAnalyticalData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'cash-flow' | 'budget' | 'financial' | 'forecast'>('cash-flow');
+  const [tab, setTab] = useState<'cash-flow' | 'budget' | 'financial' | 'forecast' | 'analytical'>('cash-flow');
   const [filters, setFilters] = useState({
     project_id: '', type: '', start_date: '', end_date: ''
   });
@@ -82,12 +83,24 @@ export default function Reports() {
     }).finally(() => setLoading(false));
   }, [filters.project_id]);
 
+  const loadAnalyticalReport = useCallback(() => {
+    setLoading(true);
+    const params: any = {};
+    if (filters.project_id) params.project_id = filters.project_id;
+    if (filters.start_date) params.start_date = filters.start_date;
+    if (filters.end_date) params.end_date = filters.end_date;
+    api.get('/reports/expense-analytical', { params })
+      .then(r => setAnalyticalData(r.data))
+      .finally(() => setLoading(false));
+  }, [filters.project_id, filters.start_date, filters.end_date]);
+
   useEffect(() => {
     if (tab === 'cash-flow') loadReport();
     else if (tab === 'budget') loadBudgetReport();
     else if (tab === 'financial') loadFinancialReport();
-    else loadForecastReport();
-  }, [tab, loadReport, loadBudgetReport, loadFinancialReport, loadForecastReport]);
+    else if (tab === 'forecast') loadForecastReport();
+    else loadAnalyticalReport();
+  }, [tab, loadReport, loadBudgetReport, loadFinancialReport, loadForecastReport, loadAnalyticalReport]);
 
   const handleExcelExport = async () => {
     if (tab === 'cash-flow') {
@@ -183,6 +196,7 @@ export default function Reports() {
           { key: 'budget', label: 'Orçado vs Realizado' },
           { key: 'financial', label: 'Físico-Financeiro' },
           { key: 'forecast', label: 'Previsão' },
+          { key: 'analytical', label: 'Analítico Despesas' },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key as any)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
@@ -208,7 +222,7 @@ export default function Reports() {
               <option value="expense">Despesas</option>
             </select>
           )}
-          {tab === 'cash-flow' && (
+          {(tab === 'cash-flow' || tab === 'analytical') && (
             <>
               <input type="date" className="form-input py-2 text-sm" value={filters.start_date}
                 onChange={e => setFilters(f => ({ ...f, start_date: e.target.value }))} />
@@ -583,6 +597,273 @@ export default function Reports() {
               <div className="text-center py-16 text-gray-400">Nenhuma conta pendente encontrada</div>
             )}
           </div>
+        </div>
+      ) : tab === 'analytical' ? (
+        <div className="space-y-5">
+          {!analyticalData ? (
+            <div className="card text-center py-16 text-gray-400">Nenhum dado encontrado</div>
+          ) : (
+            <>
+              {/* KPI Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                <div className="bg-red-50 border border-red-100 rounded-xl p-3">
+                  <div className="text-xs text-red-500 font-medium uppercase tracking-wide mb-1">Total Despesas</div>
+                  <div className="text-lg font-bold text-red-700">{fmtCurrency(analyticalData.summary.total)}</div>
+                  <div className="text-xs text-gray-400">{analyticalData.summary.count} lançamentos</div>
+                </div>
+                <div className="bg-orange-50 border border-orange-100 rounded-xl p-3">
+                  <div className="text-xs text-orange-500 font-medium uppercase tracking-wide mb-1">Média Mensal</div>
+                  <div className="text-lg font-bold text-orange-700">{fmtCurrency(analyticalData.summary.avgMonthly)}</div>
+                  <div className="text-xs text-gray-400">{analyticalData.monthly.length} meses</div>
+                </div>
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                  <div className="text-xs text-amber-600 font-medium uppercase tracking-wide mb-1">Maior Lançamento</div>
+                  <div className="text-lg font-bold text-amber-700">{fmtCurrency(analyticalData.summary.max_single)}</div>
+                </div>
+                <div className="bg-slate-50 border border-slate-100 rounded-xl p-3">
+                  <div className="flex items-center gap-1 text-xs text-slate-500 font-medium uppercase tracking-wide mb-1">
+                    <Users size={11} /> Fornecedores
+                  </div>
+                  <div className="text-lg font-bold text-slate-700">{analyticalData.summary.vendor_count}</div>
+                  <div className="text-xs text-gray-400">{analyticalData.summary.project_count} obras</div>
+                </div>
+                <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-3">
+                  <div className="flex items-center gap-1 text-xs text-yellow-600 font-medium uppercase tracking-wide mb-1">
+                    <AlertCircle size={11} /> Pendentes
+                  </div>
+                  <div className="text-lg font-bold text-yellow-700">{fmtCurrency(analyticalData.summary.pending_total)}</div>
+                </div>
+                <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
+                  <div className="flex items-center gap-1 text-xs text-rose-600 font-medium uppercase tracking-wide mb-1">
+                    <AlertCircle size={11} /> Vencidas
+                  </div>
+                  <div className="text-lg font-bold text-rose-700">{fmtCurrency(analyticalData.summary.overdue_total)}</div>
+                </div>
+              </div>
+
+              {/* By Category + Monthly Evolution side by side */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                {/* By Category bar */}
+                <div className="card">
+                  <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <Package size={15} /> Despesas por Categoria
+                  </h3>
+                  {analyticalData.byCategory.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={Math.max(220, analyticalData.byCategory.length * 26)}>
+                      <BarChart data={analyticalData.byCategory.map((c: any) => ({ ...c, pct: analyticalData.summary.total > 0 ? (c.total / analyticalData.summary.total * 100).toFixed(1) : 0 }))} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                        <XAxis type="number" tickFormatter={fmtCompact} tick={{ fontSize: 10 }} />
+                        <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 10 }} />
+                        <Tooltip
+                          formatter={(v: number, _: any, props: any) => [
+                            `${fmtCurrency(v)} (${props.payload.pct}%)`,
+                            'Total'
+                          ]}
+                        />
+                        <Bar dataKey="total" name="Despesa" radius={[0, 4, 4, 0]}>
+                          {analyticalData.byCategory.map((c: any, i: number) => (
+                            <Cell key={i} fill={c.color || '#6B7280'} fillOpacity={c.parent_id ? 0.65 : 1} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : <div className="text-center py-12 text-gray-400 text-sm">Sem dados</div>}
+                </div>
+
+                {/* Monthly evolution */}
+                <div className="card">
+                  <h3 className="font-semibold text-gray-900 mb-4">Evolução Mensal de Despesas</h3>
+                  {analyticalData.monthly.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <ComposedChart data={analyticalData.monthly}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                        <XAxis dataKey="month" tickFormatter={fmtMonth} tick={{ fontSize: 11 }} />
+                        <YAxis tickFormatter={fmtCompact} tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v: number) => fmtCurrency(v)} labelFormatter={fmtMonth} />
+                        <Bar dataKey="total" name="Despesas" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                        <Line type="monotone" dataKey="total" name="Tendência" stroke="#b91c1c" strokeWidth={2} dot={false} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  ) : <div className="text-center py-12 text-gray-400 text-sm">Sem dados</div>}
+                </div>
+              </div>
+
+              {/* By Vendor + By Payment Method side by side */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                {/* Top vendors */}
+                <div className="card">
+                  <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <Users size={15} /> Top Fornecedores
+                  </h3>
+                  {analyticalData.byVendor.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-100">
+                            <th className="text-left py-2 text-xs text-gray-500 uppercase">#</th>
+                            <th className="text-left py-2 text-xs text-gray-500 uppercase">Fornecedor</th>
+                            <th className="text-right py-2 text-xs text-gray-500 uppercase">Total</th>
+                            <th className="text-right py-2 text-xs text-gray-500 uppercase">Lançamentos</th>
+                            <th className="text-right py-2 text-xs text-gray-500 uppercase">% Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {analyticalData.byVendor.map((v: any, i: number) => {
+                            const pct = analyticalData.summary.total > 0
+                              ? (v.total / analyticalData.summary.total * 100).toFixed(1) : '0.0';
+                            return (
+                              <tr key={i} className="hover:bg-gray-50">
+                                <td className="py-2 text-xs text-gray-400">{i + 1}</td>
+                                <td className="py-2 text-gray-700 truncate max-w-[180px]">{v.vendor}</td>
+                                <td className="py-2 text-right font-medium text-red-700">{fmtCurrency(v.total)}</td>
+                                <td className="py-2 text-right text-gray-500">{v.count}</td>
+                                <td className="py-2 text-right">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <div className="w-12 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-red-400 rounded-full" style={{ width: `${Math.min(Number(pct), 100)}%` }} />
+                                    </div>
+                                    <span className="text-xs text-gray-500">{pct}%</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : <div className="text-center py-8 text-gray-400 text-sm">Sem dados</div>}
+                </div>
+
+                {/* By payment method */}
+                <div className="card">
+                  <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <CreditCard size={15} /> Por Forma de Pagamento
+                  </h3>
+                  {analyticalData.byPaymentMethod.length > 0 ? (
+                    <>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <PieChart>
+                          <Pie data={analyticalData.byPaymentMethod} dataKey="total" nameKey="payment_method"
+                            cx="50%" cy="50%" outerRadius={70}
+                            label={({ payment_method, percent }) => `${(percent * 100).toFixed(0)}%`}
+                            labelLine={false}>
+                            {analyticalData.byPaymentMethod.map((_: any, i: number) => (
+                              <Cell key={i} fill={['#ef4444','#f97316','#eab308','#84cc16','#06b6d4','#8b5cf6','#ec4899'][i % 7]} />
+                            ))}
+                          </Pie>
+                          <Tooltip formatter={(v: number) => fmtCurrency(v)} />
+                          <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="mt-2 divide-y divide-gray-50">
+                        {analyticalData.byPaymentMethod.map((pm: any, i: number) => (
+                          <div key={i} className="py-2 flex justify-between text-sm">
+                            <span className="text-gray-700">{pm.payment_method}</span>
+                            <span className="font-medium text-red-700">{fmtCurrency(pm.total)} ({pm.count})</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : <div className="text-center py-8 text-gray-400 text-sm">Sem dados</div>}
+                </div>
+              </div>
+
+              {/* By Project (shown when no project filter) */}
+              {analyticalData.byProject?.length > 0 && (
+                <div className="card">
+                  <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <BarChart2 size={15} /> Despesas por Obra
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-100">
+                          <th className="text-left py-2 px-3 text-xs text-gray-500 uppercase">Obra</th>
+                          <th className="text-right py-2 px-3 text-xs text-gray-500 uppercase">Total Despesas</th>
+                          <th className="text-right py-2 px-3 text-xs text-gray-500 uppercase">Lançamentos</th>
+                          <th className="text-right py-2 px-3 text-xs text-gray-500 uppercase">% do Total</th>
+                          <th className="text-right py-2 px-3 text-xs text-gray-500 uppercase">Vs Orçamento</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {analyticalData.byProject.map((proj: any) => {
+                          const pct = analyticalData.summary.total > 0
+                            ? (proj.total / analyticalData.summary.total * 100).toFixed(1) : '0.0';
+                          const vsBudget = proj.total_budget > 0
+                            ? (proj.total / proj.total_budget * 100).toFixed(1) : null;
+                          return (
+                            <tr key={proj.id} className="hover:bg-gray-50">
+                              <td className="py-2.5 px-3 text-gray-700 font-medium">{proj.name}</td>
+                              <td className="py-2.5 px-3 text-right font-medium text-red-700">{fmtCurrency(proj.total)}</td>
+                              <td className="py-2.5 px-3 text-right text-gray-500">{proj.count}</td>
+                              <td className="py-2.5 px-3 text-right text-gray-600">{pct}%</td>
+                              <td className={`py-2.5 px-3 text-right text-sm font-medium ${vsBudget && Number(vsBudget) > 100 ? 'text-red-600' : vsBudget && Number(vsBudget) > 80 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                {vsBudget ? `${vsBudget}%` : '-'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Detail table */}
+              <div className="card p-0 overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-900">
+                    Detalhe de Lançamentos ({analyticalData.detail?.length})
+                  </h3>
+                  <span className="text-xs text-gray-400">Últimos 200 registros</span>
+                </div>
+                <div className="overflow-x-auto max-h-96">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Data</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Obra</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Categoria</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Fornecedor</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Descrição</th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Pagamento</th>
+                        <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                        <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {analyticalData.detail?.map((t: any) => (
+                        <tr key={t.id} className={`hover:bg-gray-50 ${t.status === 'pending' ? 'bg-yellow-50/30' : ''}`}>
+                          <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(t.date)}</td>
+                          <td className="px-4 py-2.5 text-gray-700 max-w-[120px] truncate">{t.project_name}</td>
+                          <td className="px-4 py-2.5">
+                            <div className="flex flex-col gap-0.5">
+                              {t.parent_category && (
+                                <span className="text-[10px] text-gray-400 leading-none">{t.parent_category}</span>
+                              )}
+                              <span className="flex items-center gap-1.5 text-xs">
+                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.category_color || '#6B7280' }} />
+                                {t.category_name}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2.5 text-gray-600 max-w-[120px] truncate">{t.vendor || '-'}</td>
+                          <td className="px-4 py-2.5 text-gray-700 max-w-[160px] truncate">{t.description}</td>
+                          <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{t.payment_method || '-'}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${t.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              {t.status === 'pending' ? 'Pendente' : 'Pago'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-medium text-red-700">{fmtCurrency(t.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
