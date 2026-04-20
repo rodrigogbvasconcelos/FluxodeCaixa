@@ -1,8 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-// Never fall back to a hard-coded secret — require explicit env var
-const JWT_SECRET = process.env.JWT_SECRET || '';
+// Dev fallback — never used in production (index.ts exits if JWT_SECRET not set)
+const DEV_FALLBACK = 'fluxocaixa-dev-only-secret-not-for-production-use!!';
+const JWT_SECRET = process.env.JWT_SECRET ||
+  (process.env.NODE_ENV !== 'production' ? DEV_FALLBACK : '');
 
 if (JWT_SECRET.length < 32) {
   console.warn('[SEGURANÇA] JWT_SECRET deve ter pelo menos 32 caracteres.');
