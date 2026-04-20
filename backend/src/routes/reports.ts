@@ -2,6 +2,12 @@ import { Router, Response } from 'express';
 import db from '../database';
 import { authenticate, AuthRequest } from '../middleware/auth';
 
+// Validate ISO date strings from query params (YYYY-MM-DD)
+function isValidDate(v: unknown): v is string {
+  if (typeof v !== 'string') return false;
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v));
+}
+
 const router = Router();
 router.use(authenticate);
 
@@ -87,8 +93,8 @@ router.get('/transactions', (req: AuthRequest, res: Response) => {
 
   if (project_id) { where += ' AND t.project_id = ?'; params.push(project_id); }
   if (type) { where += ' AND t.type = ?'; params.push(type); }
-  if (start_date) { where += ' AND t.date >= ?'; params.push(start_date); }
-  if (end_date) { where += ' AND t.date <= ?'; params.push(end_date); }
+  if (isValidDate(start_date)) { where += ' AND t.date >= ?'; params.push(start_date); }
+  if (isValidDate(end_date))   { where += ' AND t.date <= ?'; params.push(end_date); }
 
   const transactions = db.prepare(`
     SELECT t.*, c.name as category_name, c.color as category_color,
@@ -119,27 +125,63 @@ router.get('/budget-comparison', (req: AuthRequest, res: Response) => {
     ? db.prepare('SELECT * FROM projects WHERE id = ?').all(project_id)
     : db.prepare("SELECT * FROM projects WHERE status != 'archived' ORDER BY name").all();
 
-  const result = projects.map((p: any) => {
-    const categories = db.prepare(`
-      SELECT c.id, c.name, c.color, c.type,
-        COALESCE((SELECT SUM(b.amount) FROM budgets b WHERE b.project_id = ? AND b.category_id = c.id), 0) as budget,
-        COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.project_id = ? AND t.category_id = c.id AND t.type = 'expense'), 0) as actual_expense,
-        COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.project_id = ? AND t.category_id = c.id AND t.type = 'income'), 0) as actual_income
-      FROM categories c
-      WHERE c.type = 'expense'
-      ORDER BY c.name
-    `).all(p.id, p.id, p.id);
+  if ((projects as any[]).length === 0) return res.json([]);
 
-    const totalBudget = categories.reduce((s: number, c: any) => s + c.budget, 0);
-    const totalActual = categories.reduce((s: number, c: any) => s + c.actual_expense, 0);
+  const projectIds = (projects as any[]).map(p => p.id);
+  const placeholders = projectIds.map(() => '?').join(',');
 
-    // Total income for this project
-    const incomeRow = db.prepare(`
-      SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-      WHERE project_id = ? AND type = 'income'
-    `).get(p.id) as any;
+  // Single query for all budgets across all projects
+  const allBudgets = db.prepare(`
+    SELECT project_id, category_id, SUM(amount) as amount
+    FROM budgets WHERE project_id IN (${placeholders})
+    GROUP BY project_id, category_id
+  `).all(...projectIds) as any[];
 
-    return { ...p, categories, totalBudget, totalActual, totalIncome: incomeRow.total };
+  // Single query for all expense transactions across all projects
+  const allExpenses = db.prepare(`
+    SELECT project_id, category_id,
+      SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) as actual_expense,
+      SUM(CASE WHEN type='income'  THEN amount ELSE 0 END) as actual_income
+    FROM transactions WHERE project_id IN (${placeholders})
+    GROUP BY project_id, category_id
+  `).all(...projectIds) as any[];
+
+  // Single query for all income totals
+  const allIncomeTotals = db.prepare(`
+    SELECT project_id, COALESCE(SUM(amount), 0) as total
+    FROM transactions WHERE project_id IN (${placeholders}) AND type = 'income'
+    GROUP BY project_id
+  `).all(...projectIds) as any[];
+
+  // All expense categories (one query)
+  const allCategories = db.prepare(
+    "SELECT id, name, color, type FROM categories WHERE type = 'expense' ORDER BY name"
+  ).all() as any[];
+
+  // Build lookup maps for O(1) access
+  const budgetMap: Record<string, Record<string, number>> = {};
+  for (const b of allBudgets) {
+    if (!budgetMap[b.project_id]) budgetMap[b.project_id] = {};
+    budgetMap[b.project_id][b.category_id] = b.amount;
+  }
+  const expenseMap: Record<string, Record<string, { actual_expense: number; actual_income: number }>> = {};
+  for (const e of allExpenses) {
+    if (!expenseMap[e.project_id]) expenseMap[e.project_id] = {};
+    expenseMap[e.project_id][e.category_id] = { actual_expense: e.actual_expense, actual_income: e.actual_income };
+  }
+  const incomeMap: Record<string, number> = {};
+  for (const i of allIncomeTotals) incomeMap[i.project_id] = i.total;
+
+  const result = (projects as any[]).map(p => {
+    const categories = allCategories.map((c: any) => ({
+      ...c,
+      budget: budgetMap[p.id]?.[c.id] || 0,
+      actual_expense: expenseMap[p.id]?.[c.id]?.actual_expense || 0,
+      actual_income: expenseMap[p.id]?.[c.id]?.actual_income || 0,
+    }));
+    const totalBudget = categories.reduce((s, c) => s + c.budget, 0);
+    const totalActual = categories.reduce((s, c) => s + c.actual_expense, 0);
+    return { ...p, categories, totalBudget, totalActual, totalIncome: incomeMap[p.id] || 0 };
   });
 
   res.json(result);
@@ -312,10 +354,10 @@ router.get('/expense-analytical', (req: AuthRequest, res: Response) => {
   const buildWhere = (alias = 't') => {
     let where = `${alias}.type = 'expense'`;
     const p: any[] = [];
-    if (project_id)  { where += ` AND ${alias}.project_id = ?`;   p.push(project_id); }
-    if (start_date)  { where += ` AND ${alias}.date >= ?`;         p.push(start_date); }
-    if (end_date)    { where += ` AND ${alias}.date <= ?`;         p.push(end_date); }
-    if (category_id) { where += ` AND ${alias}.category_id = ?`;  p.push(category_id); }
+    if (project_id)              { where += ` AND ${alias}.project_id = ?`;  p.push(project_id); }
+    if (isValidDate(start_date)) { where += ` AND ${alias}.date >= ?`;       p.push(start_date); }
+    if (isValidDate(end_date))   { where += ` AND ${alias}.date <= ?`;       p.push(end_date); }
+    if (category_id)             { where += ` AND ${alias}.category_id = ?`; p.push(category_id); }
     return { where, params: p };
   };
 

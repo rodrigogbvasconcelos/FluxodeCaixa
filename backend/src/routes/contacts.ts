@@ -9,6 +9,10 @@ router.use(authenticate);
 
 router.get('/', (req: AuthRequest, res: Response) => {
   const { type, search } = req.query;
+  const page  = Math.max(1, parseInt(req.query.page  as string) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string) || 100));
+  const offset = (page - 1) * limit;
+
   let where = '1=1';
   const params: any[] = [];
 
@@ -22,8 +26,9 @@ router.get('/', (req: AuthRequest, res: Response) => {
     params.push(s, s, s);
   }
 
-  const rows = db.prepare(`SELECT * FROM contacts WHERE ${where} ORDER BY name`).all(...params);
-  res.json(rows);
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM contacts WHERE ${where}`).get(...params) as any).c;
+  const rows  = db.prepare(`SELECT * FROM contacts WHERE ${where} ORDER BY name LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  res.json({ data: rows, total, page, limit });
 });
 
 router.get('/:id', (req: AuthRequest, res: Response) => {

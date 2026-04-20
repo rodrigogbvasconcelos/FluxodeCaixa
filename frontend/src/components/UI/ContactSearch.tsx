@@ -51,8 +51,9 @@ export default function ContactSearch({ value, onChange, contactType, label, req
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await api.get('/contacts', { params: { search: query, type: contactType } });
-        setResults((res.data as Contact[]).slice(0, 8));
+        const res = await api.get('/contacts', { params: { search: query, type: contactType, limit: 8 } });
+        const list: Contact[] = res.data.data ?? res.data;
+        setResults(list.slice(0, 8));
       } catch {
         setResults([]);
       } finally {

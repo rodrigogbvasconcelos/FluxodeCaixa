@@ -21,11 +21,12 @@ router.get('/', (req: AuthRequest, res: Response) => {
     params.push(project_id);
   }
 
+  // Use parameterized query for today — avoids SQL injection pattern
   const rows = db.prepare(`
     SELECT t.*,
       c.name as category_name, c.color as category_color,
       p.name as project_name,
-      CASE WHEN t.due_date IS NOT NULL AND t.due_date < '${today}' THEN 1 ELSE 0 END as is_overdue
+      CASE WHEN t.due_date IS NOT NULL AND t.due_date < ? THEN 1 ELSE 0 END as is_overdue
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
     LEFT JOIN projects p ON p.id = t.project_id
@@ -34,19 +35,19 @@ router.get('/', (req: AuthRequest, res: Response) => {
       CASE WHEN t.due_date IS NULL THEN 1 ELSE 0 END,
       t.due_date ASC,
       t.created_at DESC
-  `).all(...params);
+  `).all(today, ...params);
 
   const summaryRows = db.prepare(`
     SELECT
       type,
       COUNT(*) as count,
       SUM(amount) as total,
-      SUM(CASE WHEN due_date IS NOT NULL AND due_date < '${today}' THEN amount ELSE 0 END) as overdue_total,
-      COUNT(CASE WHEN due_date IS NOT NULL AND due_date < '${today}' THEN 1 END) as overdue_count
+      SUM(CASE WHEN due_date IS NOT NULL AND due_date < ? THEN amount ELSE 0 END) as overdue_total,
+      COUNT(CASE WHEN due_date IS NOT NULL AND due_date < ? THEN 1 END) as overdue_count
     FROM transactions
     WHERE status = 'pending'
     GROUP BY type
-  `).all() as any[];
+  `).all(today, today) as any[];
 
   const empty = { count: 0, total: 0, overdue_total: 0, overdue_count: 0 };
   const summary = {

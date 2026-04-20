@@ -58,7 +58,8 @@ export default function Contacts() {
     const params: any = {};
     if (tab !== 'all') params.type = tab;
     if (search) params.search = search;
-    api.get('/contacts', { params }).then(r => setContacts(r.data)).finally(() => setLoading(false));
+    // API returns { data, total } since pagination was added
+    api.get('/contacts', { params }).then(r => setContacts(r.data.data ?? r.data)).finally(() => setLoading(false));
   }, [tab, search]);
 
   useEffect(load, [load]);

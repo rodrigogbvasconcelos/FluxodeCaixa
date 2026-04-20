@@ -1,0 +1,43 @@
+{
+  "name": "FluxoCaixa — Gestão Financeira de Obras",
+  "short_name": "FluxoCaixa",
+  "description": "Gestão financeira e fluxo de caixa para construtoras e obras",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f1f5f9",
+  "theme_color": "#0f172a",
+  "lang": "pt-BR",
+  "categories": ["finance", "business", "productivity"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Lançamentos",
+      "short_name": "Lançamentos",
+      "description": "Abrir lançamentos financeiros",
+      "url": "/transactions",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Contas a Pagar/Receber",
+      "short_name": "Contas",
+      "description": "Ver contas pendentes",
+      "url": "/payables",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Relatórios",
+      "short_name": "Relatórios",
+      "description": "Ver relatórios financeiros",
+      "url": "/reports",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    }
+  ]
+}

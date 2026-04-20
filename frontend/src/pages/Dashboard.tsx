@@ -17,16 +17,42 @@ const fmtFull = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency
 const fmtDate = (d: string) => { try { return format(new Date(d + 'T00:00:00'), 'dd/MM', { locale: ptBR }); } catch { return d; } };
 const fmtMonth = (m: string) => { try { return format(new Date(m + '-01'), 'MMM/yy', { locale: ptBR }); } catch { return m; } };
 
-function StatCard({ label, value, icon: Icon, color, sub }: any) {
+const StatCard = React.memo(function StatCard({ label, value, icon: Icon, color, sub }: any) {
   return (
     <div className="stat-card">
-      <div className={`p-3 rounded-xl ${color}`}>
+      <div className={`p-3 rounded-xl flex-shrink-0 ${color}`}>
         <Icon size={22} className="text-white" />
       </div>
-      <div>
-        <div className="text-2xl font-bold text-gray-900">{fmt(value)}</div>
+      <div className="min-w-0">
+        <div className="text-2xl font-bold text-gray-900 truncate">{fmt(value)}</div>
         <div className="text-sm text-gray-500 mt-0.5">{label}</div>
         {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+      </div>
+    </div>
+  );
+});
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6 animate-pulse">
+      <div>
+        <div className="skeleton h-7 w-40 mb-2" />
+        <div className="skeleton h-4 w-56" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="stat-card">
+            <div className="skeleton w-12 h-12 rounded-xl flex-shrink-0" />
+            <div className="flex-1 space-y-2">
+              <div className="skeleton h-7 w-28" />
+              <div className="skeleton h-4 w-20" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <div className="xl:col-span-2 card h-64 skeleton" />
+        <div className="card h-64 skeleton" />
       </div>
     </div>
   );
@@ -40,12 +66,7 @@ export default function Dashboard() {
     api.get('/reports/dashboard').then(r => setData(r.data)).finally(() => setLoading(false));
   }, []);
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
-    </div>
-  );
-
+  if (loading) return <DashboardSkeleton />;
   if (!data) return null;
 
   const balance = data.totalIncome - data.totalExpenses;

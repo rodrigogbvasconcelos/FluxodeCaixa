@@ -120,9 +120,30 @@ export function initDatabase() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
-    CREATE INDEX IF NOT EXISTS idx_audit_table ON audit_logs(table_name);
+    CREATE INDEX IF NOT EXISTS idx_audit_user    ON audit_logs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_table   ON audit_logs(table_name);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
+
+    -- Performance indexes: transactions (most queried table)
+    CREATE INDEX IF NOT EXISTS idx_tx_project   ON transactions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_tx_category  ON transactions(category_id);
+    CREATE INDEX IF NOT EXISTS idx_tx_date      ON transactions(date);
+    CREATE INDEX IF NOT EXISTS idx_tx_type      ON transactions(type);
+    CREATE INDEX IF NOT EXISTS idx_tx_status    ON transactions(status);
+    CREATE INDEX IF NOT EXISTS idx_tx_created   ON transactions(created_at);
+    CREATE INDEX IF NOT EXISTS idx_tx_proj_type ON transactions(project_id, type);
+    CREATE INDEX IF NOT EXISTS idx_tx_proj_date ON transactions(project_id, date);
+
+    -- Projects
+    CREATE INDEX IF NOT EXISTS idx_proj_status  ON projects(status);
+
+    -- Contacts
+    CREATE INDEX IF NOT EXISTS idx_contact_name ON contacts(name);
+    CREATE INDEX IF NOT EXISTS idx_contact_type ON contacts(type);
+
+    -- Budgets
+    CREATE INDEX IF NOT EXISTS idx_budget_proj  ON budgets(project_id);
+    CREATE INDEX IF NOT EXISTS idx_budget_cat   ON budgets(category_id);
 
     CREATE TABLE IF NOT EXISTS contacts (
       id TEXT PRIMARY KEY,

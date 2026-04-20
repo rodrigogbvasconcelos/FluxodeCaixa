@@ -67,10 +67,15 @@ router.post('/upload', uploadLimiter, upload.single('invoice'), async (req: Auth
   // Store only the basename (UUID filename), never the full path
   const safeFilename = path.basename(req.file.filename);
 
+  // Sanitize original filename: strip path separators, limit length
+  const safeOriginalName = path.basename(req.file.originalname)
+    .replace(/[^\w.\-\s]/g, '_')
+    .slice(0, 200);
+
   db.prepare(`
     INSERT INTO invoices (id, original_name, file_path, file_size, mime_type, extracted_data, uploaded_by)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, req.file.originalname, safeFilename, req.file.size,
+  `).run(id, safeOriginalName, safeFilename, req.file.size,
          req.file.mimetype, JSON.stringify(extracted), req.user!.id);
 
   res.json({ id, extracted, filename: req.file.originalname });
