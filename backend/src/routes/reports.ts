@@ -304,4 +304,158 @@ router.get('/forecast', (req: AuthRequest, res: Response) => {
   });
 });
 
+// ─── Relatório Analítico de Despesas ─────────────────────────────────────────
+router.get('/expense-analytical', (req: AuthRequest, res: Response) => {
+  const { project_id, start_date, end_date, category_id } = req.query;
+  const today = new Date().toISOString().split('T')[0];
+
+  const buildWhere = (alias = 't') => {
+    let where = `${alias}.type = 'expense'`;
+    const p: any[] = [];
+    if (project_id)  { where += ` AND ${alias}.project_id = ?`;   p.push(project_id); }
+    if (start_date)  { where += ` AND ${alias}.date >= ?`;         p.push(start_date); }
+    if (end_date)    { where += ` AND ${alias}.date <= ?`;         p.push(end_date); }
+    if (category_id) { where += ` AND ${alias}.category_id = ?`;  p.push(category_id); }
+    return { where, params: p };
+  };
+
+  const { where, params } = buildWhere();
+
+  // ── Summary ──────────────────────────────────────────────────────────────
+  const summary = db.prepare(`
+    SELECT
+      COALESCE(SUM(t.amount), 0)                                     as total,
+      COUNT(*)                                                        as count,
+      COUNT(DISTINCT t.project_id)                                   as project_count,
+      COUNT(DISTINCT t.vendor)                                       as vendor_count,
+      MAX(t.amount)                                                  as max_single,
+      COALESCE(SUM(CASE WHEN t.status='pending' THEN t.amount END), 0) as pending_total,
+      COALESCE(SUM(CASE WHEN t.status='pending' AND t.due_date IS NOT NULL AND t.due_date < ? THEN t.amount END), 0) as overdue_total
+    FROM transactions t
+    WHERE ${where}
+  `).get(today, ...params) as any;
+
+  // Monthly totals for average calculation
+  const monthly = db.prepare(`
+    SELECT strftime('%Y-%m', t.date) as month,
+      COALESCE(SUM(t.amount), 0) as total,
+      COUNT(*) as count
+    FROM transactions t
+    WHERE ${where}
+    GROUP BY month
+    ORDER BY month
+  `).all(...params) as any[];
+
+  const avgMonthly = monthly.length > 0
+    ? monthly.reduce((s, m) => s + m.total, 0) / monthly.length : 0;
+
+  // ── By Category (with parent info) ──────────────────────────────────────
+  const byCategory = db.prepare(`
+    SELECT
+      c.id, c.name, c.color, c.parent_id,
+      cp.name as parent_name, cp.color as parent_color,
+      COALESCE(SUM(t.amount), 0) as total,
+      COUNT(t.id) as count,
+      COALESCE(MAX(t.amount), 0) as max_single,
+      COALESCE(SUM(CASE WHEN t.status='pending' THEN t.amount END), 0) as pending,
+      strftime('%Y-%m', MAX(t.date)) as last_transaction
+    FROM categories c
+    LEFT JOIN categories cp ON cp.id = c.parent_id
+    LEFT JOIN transactions t ON t.category_id = c.id AND ${where}
+    WHERE c.type = 'expense'
+    GROUP BY c.id
+    HAVING total > 0
+    ORDER BY total DESC
+  `).all(...params) as any[];
+
+  // ── Monthly by category (last 12 months) ────────────────────────────────
+  const { where: mWhere, params: mParams } = buildWhere();
+  const monthlyByCategory = db.prepare(`
+    SELECT
+      strftime('%Y-%m', t.date) as month,
+      c.id as category_id, c.name as category_name, c.color as category_color,
+      SUM(t.amount) as total
+    FROM transactions t
+    JOIN categories c ON c.id = t.category_id
+    WHERE ${mWhere} AND t.date >= date('now', '-12 months')
+    GROUP BY month, c.id
+    ORDER BY month, total DESC
+  `).all(...mParams) as any[];
+
+  // ── By Vendor (top 20) ────────────────────────────────────────────────────
+  const { where: vWhere, params: vParams } = buildWhere();
+  const byVendor = db.prepare(`
+    SELECT
+      COALESCE(t.vendor, '(sem fornecedor)') as vendor,
+      COALESCE(SUM(t.amount), 0) as total,
+      COUNT(*) as count,
+      COALESCE(AVG(t.amount), 0) as avg_amount,
+      MAX(t.date) as last_date
+    FROM transactions t
+    WHERE ${vWhere}
+    GROUP BY COALESCE(t.vendor, '(sem fornecedor)')
+    ORDER BY total DESC
+    LIMIT 20
+  `).all(...vParams) as any[];
+
+  // ── By Payment Method ────────────────────────────────────────────────────
+  const { where: pmWhere, params: pmParams } = buildWhere();
+  const byPaymentMethod = db.prepare(`
+    SELECT
+      COALESCE(t.payment_method, 'Não informado') as payment_method,
+      COALESCE(SUM(t.amount), 0) as total,
+      COUNT(*) as count
+    FROM transactions t
+    WHERE ${pmWhere}
+    GROUP BY COALESCE(t.payment_method, 'Não informado')
+    ORDER BY total DESC
+  `).all(...pmParams) as any[];
+
+  // ── By Project (if no project filter) ────────────────────────────────────
+  let byProject: any[] = [];
+  if (!project_id) {
+    const { where: pjWhere, params: pjParams } = buildWhere();
+    byProject = db.prepare(`
+      SELECT
+        p.id, p.name, p.status, p.total_budget,
+        COALESCE(SUM(t.amount), 0) as total,
+        COUNT(t.id) as count
+      FROM projects p
+      LEFT JOIN transactions t ON t.project_id = p.id AND ${pjWhere}
+      GROUP BY p.id
+      HAVING total > 0
+      ORDER BY total DESC
+    `).all(...pjParams) as any[];
+  }
+
+  // ── Recent transactions detail ────────────────────────────────────────────
+  const { where: dtWhere, params: dtParams } = buildWhere();
+  const detail = db.prepare(`
+    SELECT
+      t.id, t.date, t.description, t.amount, t.vendor, t.document_number,
+      t.payment_method, t.status, t.due_date, t.notes,
+      c.name as category_name, c.color as category_color,
+      cp.name as parent_category,
+      p.name as project_name
+    FROM transactions t
+    JOIN categories c ON c.id = t.category_id
+    LEFT JOIN categories cp ON cp.id = c.parent_id
+    JOIN projects p ON p.id = t.project_id
+    WHERE ${dtWhere}
+    ORDER BY t.date DESC, t.created_at DESC
+    LIMIT 200
+  `).all(...dtParams) as any[];
+
+  res.json({
+    summary: { ...summary, avgMonthly },
+    monthly,
+    byCategory,
+    monthlyByCategory,
+    byVendor,
+    byPaymentMethod,
+    byProject,
+    detail,
+  });
+});
+
 export default router;
