@@ -493,7 +493,7 @@ export default function Reports() {
             </div>
           )}
         </div>
-      ) : (
+      ) : tab === 'forecast' ? (
         <div className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
@@ -865,7 +865,7 @@ export default function Reports() {
             </>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
