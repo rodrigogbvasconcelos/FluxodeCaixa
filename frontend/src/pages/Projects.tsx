@@ -20,7 +20,7 @@ const statusLabels: Record<string, { label: string; color: string }> = {
   archived: { label: 'Arquivado', color: 'bg-gray-100 text-gray-600' },
 };
 
-const emptyForm = { name: '', description: '', client: '', address: '', start_date: '', end_date: '', total_budget: '', status: 'active' };
+const emptyForm = { name: '', description: '', client: '', address: '', start_date: '', end_date: '', total_budget: '', progress_pct: '', status: 'active' };
 
 export default function Projects() {
   const { hasRole } = useAuth();
@@ -44,7 +44,9 @@ export default function Projects() {
     setForm({
       name: p.name, description: p.description || '', client: p.client || '',
       address: p.address || '', start_date: p.start_date || '', end_date: p.end_date || '',
-      total_budget: String(p.total_budget || ''), status: p.status,
+      total_budget: String(p.total_budget || ''),
+      progress_pct: p.progress_pct != null ? String(p.progress_pct) : '',
+      status: p.status,
     });
     setModalOpen(true);
   };
@@ -53,7 +55,11 @@ export default function Projects() {
     e.preventDefault();
     setSaving(true);
     try {
-      const payload = { ...form, total_budget: parseFloat(form.total_budget) || 0 };
+      const payload = {
+        ...form,
+        total_budget: parseFloat(form.total_budget) || 0,
+        progress_pct: Math.min(100, Math.max(0, parseFloat(form.progress_pct) || 0)),
+      };
       if (editing) {
         await api.put(`/projects/${editing.id}`, payload);
         toast.success('Projeto atualizado!');
@@ -189,6 +195,30 @@ export default function Projects() {
                   </div>
                 )}
 
+                {p.progress_pct != null && (
+                  <div className="mb-3">
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <span>Avanço físico</span>
+                      <span className="font-medium text-gray-700">{Number(p.progress_pct).toFixed(1)}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-blue-500 transition-all"
+                        style={{ width: `${Math.min(Number(p.progress_pct), 100)}%` }}
+                      />
+                    </div>
+                    {budget > 0 && (
+                      <div className="text-[11px] text-gray-400 mt-1">
+                        {Number(p.progress_pct) > progress
+                          ? `Físico adiantado em ${(Number(p.progress_pct) - progress).toFixed(1)}pp vs financeiro`
+                          : Number(p.progress_pct) < progress
+                          ? `Financeiro adiantado em ${(progress - Number(p.progress_pct)).toFixed(1)}pp vs físico`
+                          : 'Físico e financeiro alinhados'}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex gap-2 mt-3 pt-3 border-t border-gray-50">
                   {hasRole('admin', 'manager') && (
                     <>
@@ -248,6 +278,12 @@ export default function Projects() {
               <label className="form-label">Orçamento Total (R$)</label>
               <input type="number" step="0.01" min="0" className="form-input" value={form.total_budget}
                 onChange={e => setForm(f => ({ ...f, total_budget: e.target.value }))} placeholder="0,00" />
+            </div>
+            <div>
+              <label className="form-label">Avanço Físico (%)</label>
+              <input type="number" step="0.1" min="0" max="100" className="form-input" value={form.progress_pct}
+                onChange={e => setForm(f => ({ ...f, progress_pct: e.target.value }))} placeholder="0" />
+              <p className="text-xs text-gray-400 mt-1">Percentual executado da obra (0-100)</p>
             </div>
             <div className="md:col-span-2">
               <label className="form-label">Descrição</label>
