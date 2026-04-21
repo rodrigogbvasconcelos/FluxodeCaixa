@@ -83,6 +83,10 @@ export default function Backup() {
       await api.post('/backup/restore', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+      // Clear auth token: the restored DB may have different user UUIDs.
+      // The user must log in again with credentials from the restored database.
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
       setRestoreDone(true);
       setReloadCountdown(5);
     } catch (err: any) {
@@ -91,7 +95,7 @@ export default function Backup() {
     }
   };
 
-  // Auto-reload countdown after restore
+  // Auto-reload countdown — redirects to login (token already cleared)
   useEffect(() => {
     if (reloadCountdown <= 0) return;
     if (reloadCountdown === 1) {
@@ -110,7 +114,7 @@ export default function Backup() {
         </div>
         <h2 className="text-xl font-bold text-gray-900 mb-2">Restauração concluída!</h2>
         <p className="text-gray-500 text-sm text-center max-w-sm mb-2">
-          O banco de dados foi restaurado. A página será recarregada automaticamente.
+          O banco de dados foi restaurado. Você será redirecionado para o login — use as credenciais da base restaurada.
         </p>
         {reloadCountdown > 0 && (
           <p className="text-blue-600 font-semibold text-sm mb-6">
@@ -255,7 +259,8 @@ export default function Backup() {
             <p><strong>Atenção:</strong> Esta operação é irreversível.</p>
             <ul className="list-disc list-inside space-y-0.5">
               <li>Todos os dados atuais serão <strong>substituídos</strong> pelos dados do backup</li>
-              <li>O servidor irá <strong>reiniciar automaticamente</strong> após a restauração</li>
+              <li>Você será <strong>desconectado automaticamente</strong> e deverá fazer login novamente</li>
+              <li>Use as credenciais que existiam no backup (usuário e senha)</li>
               <li>Recomenda-se gerar um backup do estado atual antes de restaurar</li>
             </ul>
           </div>
