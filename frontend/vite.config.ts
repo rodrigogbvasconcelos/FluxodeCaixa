@@ -15,26 +15,21 @@ export default defineConfig({
   },
 
   build: {
-    // Smaller chunks = faster first load
     chunkSizeWarningLimit: 500,
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Core React runtime — cached for long time
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          // Charts library (largest dep) — isolated chunk
-          'charts': ['recharts'],
-          // Date utilities
-          'dates': ['date-fns'],
-          // UI utilities
-          'ui': ['lucide-react', 'react-hot-toast'],
+        manualChunks(id: string) {
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router-dom')) {
+            return 'react-vendor';
+          }
+          if (id.includes('node_modules/recharts')) return 'charts';
+          if (id.includes('node_modules/date-fns')) return 'dates';
+          if (id.includes('node_modules/lucide-react') || id.includes('node_modules/react-hot-toast')) return 'ui';
         },
       },
     },
-    // Enable minification optimizations
     minify: 'esbuild',
     sourcemap: false,
-    // Target modern browsers for smaller output
     target: 'es2020',
   },
 });

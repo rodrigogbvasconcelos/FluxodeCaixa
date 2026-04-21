@@ -200,7 +200,7 @@ export default function Transactions() {
   const buildCategoryOptions = (cats: Category[], parentId?: string, level = 0): Category[] => {
     const result: Category[] = [];
     cats
-      .filter(c => c.parent_id === parentId)
+      .filter(c => (c.parent_id ?? undefined) === parentId)
       .forEach(cat => {
         result.push({ ...cat, name: '  '.repeat(level) + cat.name });
         result.push(...buildCategoryOptions(cats, cat.id, level + 1));

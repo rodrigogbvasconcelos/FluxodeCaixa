@@ -37,48 +37,63 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
 
 router.post('/', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
   const { name, description, client, address, start_date, end_date, total_budget, progress_pct } = req.body;
-  if (!name) return res.status(400).json({ error: 'Nome é obrigatório' });
+  if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório' });
 
-  const id = uuidv4();
-  const safePct = Math.min(100, Math.max(0, Number(progress_pct) || 0));
-  db.prepare(`
-    INSERT INTO projects (id, name, description, client, address, start_date, end_date, total_budget, progress_pct, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, description || null, client || null, address || null,
-         start_date || null, end_date || null, total_budget || 0, safePct, req.user!.id);
+  try {
+    const id = uuidv4();
+    const safePct = Math.min(100, Math.max(0, Number(progress_pct) || 0));
+    const safeBudget = Number(total_budget) || 0;
+    db.prepare(`
+      INSERT INTO projects (id, name, description, client, address, start_date, end_date, total_budget, progress_pct, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, name.trim(), description || null, client || null, address || null,
+           start_date || null, end_date || null, safeBudget, safePct, req.user!.id);
 
-  logAudit({
-    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
-    action: 'CREATE', tableName: 'projects', recordId: id,
-    newData: { name, description, client, address, start_date, end_date, total_budget, progress_pct: safePct },
-    ip: getIp(req),
-  });
+    logAudit({
+      userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+      action: 'CREATE', tableName: 'projects', recordId: id,
+      newData: { name, description, client, address, start_date, end_date, total_budget: safeBudget, progress_pct: safePct },
+      ip: getIp(req),
+    });
 
-  res.status(201).json({ id, name });
+    res.status(201).json({ id, name });
+  } catch (err: any) {
+    console.error('[PROJECTS] Erro ao criar projeto:', err);
+    res.status(500).json({ error: 'Erro ao criar projeto: ' + (err.message || 'erro interno') });
+  }
 });
 
 router.put('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
   const { name, description, client, address, start_date, end_date, status, total_budget, progress_pct } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório' });
 
-  const old = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as any;
-  const safePct = Math.min(100, Math.max(0, Number(progress_pct) || 0));
+  try {
+    const old = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Projeto não encontrado' });
 
-  db.prepare(`
-    UPDATE projects SET name = ?, description = ?, client = ?, address = ?,
-    start_date = ?, end_date = ?, status = ?, total_budget = ?, progress_pct = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(name, description || null, client || null, address || null,
-         start_date || null, end_date || null, status || 'active', total_budget || 0, safePct, req.params.id);
+    const safePct = Math.min(100, Math.max(0, Number(progress_pct) || 0));
+    const safeBudget = Number(total_budget) || 0;
 
-  logAudit({
-    userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
-    action: 'UPDATE', tableName: 'projects', recordId: req.params.id,
-    oldData: old ?? null,
-    newData: { name, description, client, address, start_date, end_date, status, total_budget },
-    ip: getIp(req),
-  });
+    db.prepare(`
+      UPDATE projects SET name = ?, description = ?, client = ?, address = ?,
+      start_date = ?, end_date = ?, status = ?, total_budget = ?, progress_pct = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(name.trim(), description || null, client || null, address || null,
+           start_date || null, end_date || null, status || 'active', safeBudget, safePct, req.params.id);
 
-  res.json({ message: 'Projeto atualizado' });
+    logAudit({
+      userId: req.user!.id, userName: req.user!.name, userEmail: req.user!.email,
+      action: 'UPDATE', tableName: 'projects', recordId: req.params.id,
+      oldData: old ?? null,
+      newData: { name, description, client, address, start_date, end_date, status, total_budget: safeBudget },
+      ip: getIp(req),
+    });
+
+    res.json({ message: 'Projeto atualizado' });
+  } catch (err: any) {
+    console.error('[PROJECTS] Erro ao atualizar projeto:', err);
+    res.status(500).json({ error: 'Erro ao atualizar projeto: ' + (err.message || 'erro interno') });
+  }
 });
 
 router.delete('/:id', requireRole('admin'), (req: AuthRequest, res: Response) => {

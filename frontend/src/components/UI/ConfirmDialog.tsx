@@ -24,8 +24,9 @@ export default function ConfirmDialog({
         <p className="text-sm text-gray-600 mt-1">{message}</p>
       </div>
       <div className="flex gap-3 justify-end">
-        <button onClick={onClose} className="btn-secondary text-sm px-4 py-2">Cancelar</button>
+        <button type="button" onClick={onClose} className="btn-secondary text-sm px-4 py-2">Cancelar</button>
         <button
+          type="button"
           onClick={() => { onConfirm(); onClose(); }}
           className={danger ? 'btn-danger text-sm px-4 py-2' : 'btn-primary text-sm px-4 py-2'}
         >

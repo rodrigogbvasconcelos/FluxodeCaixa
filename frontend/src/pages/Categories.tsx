@@ -132,25 +132,23 @@ export default function Categories() {
             <div className="flex-1 min-w-0">
               <div className="font-medium text-gray-900 truncate">{category.name}</div>
               {category.is_default ? (
-                <span className="text-xs text-gray-400">Padrão</span>
+                <span className="text-xs text-amber-600">Padrão (editável)</span>
               ) : (
                 <span className="text-xs text-blue-500">Personalizada</span>
               )}
             </div>
           </div>
-          {!category.is_default && (
-            <div className="flex gap-2">
-              <button onClick={() => openNew(category.type, category.id)} className="flex-1 btn-secondary text-xs py-1.5 justify-center">
-                <Plus size={12} /> Subitem
-              </button>
-              <button onClick={() => openEdit(category)} className="flex-1 btn-secondary text-xs py-1.5 justify-center">
-                <Edit2 size={12} /> Editar
-              </button>
-              <button onClick={() => setDeleteTarget(category)} className="flex-1 btn-danger text-xs py-1.5 justify-center">
-                <Trash2 size={12} /> Excluir
-              </button>
-            </div>
-          )}
+          <div className="flex gap-2">
+            <button onClick={() => openNew(category.type, category.id)} className="flex-1 btn-secondary text-xs py-1.5 justify-center">
+              <Plus size={12} /> Subitem
+            </button>
+            <button onClick={() => openEdit(category)} className="flex-1 btn-secondary text-xs py-1.5 justify-center">
+              <Edit2 size={12} /> Editar
+            </button>
+            <button onClick={() => setDeleteTarget(category)} className="flex-1 btn-danger text-xs py-1.5 justify-center">
+              <Trash2 size={12} /> Excluir
+            </button>
+          </div>
         </div>
         {hasChildren && isExpanded && (
           <div className="ml-6">
