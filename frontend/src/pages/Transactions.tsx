@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import {
   Plus, Search, Edit2, Trash2, Filter, FileText,
-  ArrowUpRight, ArrowDownRight, ChevronLeft, ChevronRight, Paperclip, X,
+  ArrowUpRight, ArrowDownRight, ChevronLeft, ChevronRight, ChevronDown, Paperclip, X,
   Download, Eye, Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -18,6 +19,148 @@ import { parseBrCurrency } from '../utils/formatters';
 
 const fmtCurrency = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 const fmtDate = (d: string) => { try { return format(new Date(d + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR }); } catch { return d; } };
+
+// ── CategorySelect ────────────────────────────────────────────────────────────
+// Custom dropdown that groups subcategories under their parent and displays
+// the full path ("Parent › Sub") when a subcategory is selected.
+// Uses a portal + fixed positioning so the dropdown escapes overflow-y-auto modals.
+interface CategorySelectProps {
+  categories: Category[];
+  value: string;
+  onChange: (id: string) => void;
+  required?: boolean;
+}
+
+function CategorySelect({ categories, value, onChange, required }: CategorySelectProps) {
+  const [open, setOpen] = useState(false);
+  const [dropStyle, setDropStyle] = useState<React.CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const parents = categories.filter(c => !c.parent_id);
+  const childrenOf = (pid: string) => categories.filter(c => c.parent_id === pid);
+
+  const selected = categories.find(c => c.id === value) ?? null;
+  const selectedParent = selected?.parent_id
+    ? categories.find(c => c.id === selected.parent_id) ?? null
+    : null;
+
+  // Reposition dropdown to follow trigger (handles scroll inside modal)
+  const reposition = () => {
+    if (!triggerRef.current) return;
+    const r = triggerRef.current.getBoundingClientRect();
+    setDropStyle({ top: r.bottom + 4, left: r.left, width: r.width, zIndex: 9999, position: 'fixed' });
+  };
+
+  const openDropdown = () => { reposition(); setOpen(true); };
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!triggerRef.current?.contains(t) && !dropdownRef.current?.contains(t)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const select = (id: string) => { onChange(id); setOpen(false); };
+
+  const Dot = ({ color, size = 10 }: { color: string; size?: number }) => (
+    <span className="rounded-full flex-shrink-0 inline-block"
+      style={{ width: size, height: size, background: color }} />
+  );
+
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => open ? setOpen(false) : openDropdown()}
+        className="form-input flex items-center justify-between gap-2 text-left w-full min-h-[38px]"
+      >
+        {selected ? (
+          <span className="flex items-center gap-1.5 min-w-0 flex-1">
+            {selectedParent ? (
+              <>
+                <Dot color={selectedParent.color} />
+                <span className="text-gray-400 text-sm truncate max-w-[80px]">{selectedParent.name}</span>
+                <span className="text-gray-300 flex-shrink-0">›</span>
+                <Dot color={selected.color} />
+                <span className="text-gray-900 text-sm font-medium truncate">{selected.name}</span>
+              </>
+            ) : (
+              <>
+                <Dot color={selected.color} />
+                <span className="text-gray-900 text-sm font-medium truncate">{selected.name}</span>
+              </>
+            )}
+          </span>
+        ) : (
+          <span className="text-gray-400 text-sm flex-1">Selecione...</span>
+        )}
+        <ChevronDown size={14} className={`text-gray-400 flex-shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* Hidden native select keeps browser form validation working */}
+      {required && (
+        <select value={value} onChange={() => {}} required tabIndex={-1} aria-hidden="true"
+          className="sr-only absolute bottom-0 left-0 w-full h-0 opacity-0">
+          <option value="" />
+          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      )}
+
+      {open && ReactDOM.createPortal(
+        <div ref={dropdownRef} style={dropStyle}
+          className="bg-white border border-gray-200 rounded-xl shadow-2xl max-h-64 overflow-y-auto">
+          {parents.length === 0 && (
+            <div className="px-4 py-3 text-sm text-gray-400">Nenhuma categoria disponível</div>
+          )}
+          {parents.map(parent => {
+            const children = childrenOf(parent.id);
+            return (
+              <div key={parent.id}>
+                {/* Parent row */}
+                <button type="button"
+                  onMouseDown={e => { e.preventDefault(); select(parent.id); }}
+                  className={`w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors
+                    ${value === parent.id ? 'bg-blue-50' : ''}`}>
+                  <Dot color={parent.color} size={10} />
+                  <span className={`text-sm font-semibold flex-1 ${value === parent.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                    {parent.name}
+                  </span>
+                  {children.length > 0 && (
+                    <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                      {children.length}
+                    </span>
+                  )}
+                </button>
+                {/* Subcategory rows */}
+                {children.map(child => (
+                  <button key={child.id} type="button"
+                    onMouseDown={e => { e.preventDefault(); select(child.id); }}
+                    className={`w-full text-left pl-7 pr-3 py-1.5 flex items-center gap-2 hover:bg-gray-50 transition-colors
+                      ${value === child.id ? 'bg-blue-50' : ''}`}>
+                    <span className="text-gray-300 text-xs flex-shrink-0">↳</span>
+                    <Dot color={child.color} size={8} />
+                    <span className={`text-sm flex-1 ${value === child.id ? 'text-blue-700 font-medium' : 'text-gray-700'}`}>
+                      {child.name}
+                    </span>
+                    {value === child.id && (
+                      <span className="text-[10px] text-blue-500 flex-shrink-0">✓</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
 
 const paymentMethods = ['Dinheiro', 'PIX', 'Transferência', 'Boleto', 'Cartão de Débito', 'Cartão de Crédito', 'Cheque'];
 
@@ -197,18 +340,6 @@ export default function Transactions() {
 
   const filteredCategories = categories.filter(c => c.type === form.type);
 
-  const buildCategoryOptions = (cats: Category[], parentId?: string, level = 0): Category[] => {
-    const result: Category[] = [];
-    cats
-      .filter(c => (c.parent_id ?? undefined) === parentId)
-      .forEach(cat => {
-        result.push({ ...cat, name: '  '.repeat(level) + cat.name });
-        result.push(...buildCategoryOptions(cats, cat.id, level + 1));
-      });
-    return result;
-  };
-
-  const categoryOptions = buildCategoryOptions(filteredCategories);
   const totalPages = Math.ceil(total / LIMIT);
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
@@ -420,11 +551,12 @@ export default function Transactions() {
             </div>
             <div>
               <label className="form-label">Categoria *</label>
-              <select className="form-input" value={form.category_id}
-                onChange={e => setForm(f => ({ ...f, category_id: e.target.value }))} required>
-                <option value="">Selecione...</option>
-                {categoryOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <CategorySelect
+                categories={filteredCategories}
+                value={form.category_id}
+                onChange={id => setForm(f => ({ ...f, category_id: id }))}
+                required
+              />
             </div>
             <div>
               <label className="form-label">Valor (R$) *</label>
