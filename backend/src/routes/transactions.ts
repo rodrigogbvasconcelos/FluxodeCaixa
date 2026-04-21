@@ -42,10 +42,13 @@ router.get('/', (req: AuthRequest, res: Response) => {
   const total = (db.prepare(`SELECT COUNT(*) as c FROM transactions t WHERE ${where}`).get(...params) as any).c;
   const rows = db.prepare(`
     SELECT t.*, c.name as category_name, c.color as category_color, c.type as category_type,
+      c.parent_id as category_parent_id,
+      pc.name as category_parent_name, pc.color as category_parent_color,
       p.name as project_name, u.name as created_by_name,
       i.original_name as invoice_name
     FROM transactions t
     LEFT JOIN categories c ON c.id = t.category_id
+    LEFT JOIN categories pc ON pc.id = c.parent_id
     LEFT JOIN projects p ON p.id = t.project_id
     LEFT JOIN users u ON u.id = t.created_by
     LEFT JOIN invoices i ON i.id = t.invoice_id

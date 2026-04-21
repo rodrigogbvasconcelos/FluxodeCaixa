@@ -51,22 +51,27 @@ interface BrCurrencyInputProps extends Omit<React.InputHTMLAttributes<HTMLInputE
  * Stores and returns raw string (e.g. "1234,56" or "1234.56").
  * Use parseBrCurrency() to convert to float before saving.
  */
-export function BrCurrencyInput({ value, onChange, className, ...props }: BrCurrencyInputProps) {
+export function BrCurrencyInput({ value, onChange, className, onBlur, ...props }: BrCurrencyInputProps & { onBlur?: React.FocusEventHandler<HTMLInputElement> }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Allow digits, comma and dot only
     let raw = e.target.value.replace(/[^\d.,]/g, '');
-    // Only one comma or dot allowed
     const commas = (raw.match(/,/g) || []).length;
     const dots = (raw.match(/\./g) || []).length;
-    if (commas > 1) {
-      raw = raw.slice(0, e.target.value.lastIndexOf(','));
-    }
-    if (dots > 1) {
-      raw = raw.slice(0, e.target.value.lastIndexOf('.'));
-    }
+    if (commas > 1) raw = raw.slice(0, raw.lastIndexOf(','));
+    if (dots > 1) raw = raw.slice(0, raw.lastIndexOf('.'));
     onChange(raw);
+  };
+
+  // On blur: format to 2 decimal places (e.g. "1500" → "1500,00", "12,5" → "12,50")
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    if (value) {
+      const num = parseBrCurrency(value);
+      if (!isNaN(num) && num > 0) {
+        onChange(num.toFixed(2).replace('.', ','));
+      }
+    }
+    onBlur?.(e);
   };
 
   return (
@@ -77,6 +82,7 @@ export function BrCurrencyInput({ value, onChange, className, ...props }: BrCurr
       inputMode="decimal"
       value={value}
       onChange={handleChange}
+      onBlur={handleBlur}
       placeholder="0,00"
       className={className}
     />

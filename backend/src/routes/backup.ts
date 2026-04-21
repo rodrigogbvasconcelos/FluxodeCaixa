@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import AdmZip from 'adm-zip';
-import db, { closeAndReplaceDb, DB_PATH } from '../database';
+import db, { reinitDb, DB_PATH } from '../database';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -180,23 +180,20 @@ router.post('/restore', upload.single('backup'), (req: AuthRequest, res: Respons
       }
     }
 
-    // Close DB and replace file (must happen after response is sent)
+    // Replace DB and reopen connection after response is flushed (no process restart needed)
     res.json({
-      message: 'Restauração concluída com sucesso. O servidor irá reiniciar em instantes.',
+      message: 'Restauração concluída com sucesso. Recarregue a página para ver os dados restaurados.',
       backup_date: meta.created_at,
       table_counts: meta.table_counts,
     });
 
-    // Replace DB and restart after response is flushed
     setImmediate(() => {
       try {
-        closeAndReplaceDb(tempDbPath);
+        reinitDb(tempDbPath);
         fs.unlinkSync(tempDbPath);
       } catch (err) {
-        console.error('Erro ao substituir banco de dados:', err);
+        console.error('[BACKUP] Erro ao restaurar banco de dados:', err);
       }
-      console.log('[BACKUP] Restauração concluída. Reiniciando processo...');
-      setTimeout(() => process.exit(0), 500);
     });
   } catch (err) {
     console.error('backup restore error:', err);

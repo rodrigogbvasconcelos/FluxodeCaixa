@@ -37,6 +37,7 @@ export default function Backup() {
   const [downloading, setDownloading] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreDone, setRestoreDone] = useState(false);
+  const [reloadCountdown, setReloadCountdown] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -79,16 +80,27 @@ export default function Backup() {
     try {
       const fd = new FormData();
       fd.append('backup', selectedFile);
-      const res = await api.post('/backup/restore', fd, {
+      await api.post('/backup/restore', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setRestoreDone(true);
-      toast.success(res.data.message || 'Restauração concluída');
+      setReloadCountdown(5);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Erro ao restaurar backup');
       setRestoring(false);
     }
   };
+
+  // Auto-reload countdown after restore
+  useEffect(() => {
+    if (reloadCountdown <= 0) return;
+    if (reloadCountdown === 1) {
+      const t = setTimeout(() => window.location.reload(), 1000);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(() => setReloadCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [reloadCountdown]);
 
   if (restoreDone) {
     return (
@@ -97,14 +109,16 @@ export default function Backup() {
           <CheckCircle size={36} className="text-emerald-600" />
         </div>
         <h2 className="text-xl font-bold text-gray-900 mb-2">Restauração concluída!</h2>
-        <p className="text-gray-500 text-sm text-center max-w-sm mb-6">
-          O servidor está reiniciando. Aguarde alguns segundos e recarregue a página para acessar os dados restaurados.
+        <p className="text-gray-500 text-sm text-center max-w-sm mb-2">
+          O banco de dados foi restaurado. A página será recarregada automaticamente.
         </p>
-        <button
-          onClick={() => window.location.reload()}
-          className="btn-primary"
-        >
-          <RefreshCw size={16} /> Recarregar página
+        {reloadCountdown > 0 && (
+          <p className="text-blue-600 font-semibold text-sm mb-6">
+            Recarregando em {reloadCountdown}s...
+          </p>
+        )}
+        <button onClick={() => window.location.reload()} className="btn-primary">
+          <RefreshCw size={16} /> Recarregar agora
         </button>
       </div>
     );

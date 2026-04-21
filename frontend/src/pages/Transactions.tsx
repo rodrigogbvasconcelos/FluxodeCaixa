@@ -33,43 +33,63 @@ interface CategorySelectProps {
 
 function CategorySelect({ categories, value, onChange, required }: CategorySelectProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
   const [dropStyle, setDropStyle] = useState<React.CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  const parents = categories.filter(c => !c.parent_id);
-  const childrenOf = (pid: string) => categories.filter(c => c.parent_id === pid);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const selected = categories.find(c => c.id === value) ?? null;
   const selectedParent = selected?.parent_id
     ? categories.find(c => c.id === selected.parent_id) ?? null
     : null;
 
-  // Reposition dropdown to follow trigger (handles scroll inside modal)
+  // Filter: if search has text, show all matching items flat; otherwise show hierarchy
+  const q = search.toLowerCase().trim();
+  const filteredFlat = q
+    ? categories.filter(c => c.name.toLowerCase().includes(q))
+    : null;
+  const parents = filteredFlat ? [] : categories.filter(c => !c.parent_id);
+  const childrenOf = (pid: string) => categories.filter(c => c.parent_id === pid);
+
   const reposition = () => {
     if (!triggerRef.current) return;
     const r = triggerRef.current.getBoundingClientRect();
     setDropStyle({ top: r.bottom + 4, left: r.left, width: r.width, zIndex: 9999, position: 'fixed' });
   };
 
-  const openDropdown = () => { reposition(); setOpen(true); };
+  const openDropdown = () => {
+    setSearch('');
+    reposition();
+    setOpen(true);
+    setTimeout(() => searchRef.current?.focus(), 50);
+  };
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (!triggerRef.current?.contains(t) && !dropdownRef.current?.contains(t)) setOpen(false);
+      if (!triggerRef.current?.contains(t) && !dropdownRef.current?.contains(t)) {
+        setOpen(false);
+        setSearch('');
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const select = (id: string) => { onChange(id); setOpen(false); };
+  const select = (id: string) => { onChange(id); setOpen(false); setSearch(''); };
 
   const Dot = ({ color, size = 10 }: { color: string; size?: number }) => (
     <span className="rounded-full flex-shrink-0 inline-block"
       style={{ width: size, height: size, background: color }} />
   );
+
+  // Name of parent for a category (used in flat search results)
+  const parentName = (cat: Category) => {
+    if (!cat.parent_id) return null;
+    return categories.find(c => c.id === cat.parent_id)?.name ?? null;
+  };
 
   return (
     <div className="relative">
@@ -102,7 +122,6 @@ function CategorySelect({ categories, value, onChange, required }: CategorySelec
         <ChevronDown size={14} className={`text-gray-400 flex-shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {/* Hidden native select keeps browser form validation working */}
       {required && (
         <select value={value} onChange={() => {}} required tabIndex={-1} aria-hidden="true"
           className="sr-only absolute bottom-0 left-0 w-full h-0 opacity-0">
@@ -113,48 +132,83 @@ function CategorySelect({ categories, value, onChange, required }: CategorySelec
 
       {open && ReactDOM.createPortal(
         <div ref={dropdownRef} style={dropStyle}
-          className="bg-white border border-gray-200 rounded-xl shadow-2xl max-h-64 overflow-y-auto">
-          {parents.length === 0 && (
-            <div className="px-4 py-3 text-sm text-gray-400">Nenhuma categoria disponível</div>
-          )}
-          {parents.map(parent => {
-            const children = childrenOf(parent.id);
-            return (
-              <div key={parent.id}>
-                {/* Parent row */}
-                <button type="button"
-                  onMouseDown={e => { e.preventDefault(); select(parent.id); }}
-                  className={`w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors
-                    ${value === parent.id ? 'bg-blue-50' : ''}`}>
-                  <Dot color={parent.color} size={10} />
-                  <span className={`text-sm font-semibold flex-1 ${value === parent.id ? 'text-blue-700' : 'text-gray-800'}`}>
-                    {parent.name}
-                  </span>
-                  {children.length > 0 && (
-                    <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full flex-shrink-0">
-                      {children.length}
-                    </span>
-                  )}
-                </button>
-                {/* Subcategory rows */}
-                {children.map(child => (
-                  <button key={child.id} type="button"
-                    onMouseDown={e => { e.preventDefault(); select(child.id); }}
-                    className={`w-full text-left pl-7 pr-3 py-1.5 flex items-center gap-2 hover:bg-gray-50 transition-colors
-                      ${value === child.id ? 'bg-blue-50' : ''}`}>
-                    <span className="text-gray-300 text-xs flex-shrink-0">↳</span>
-                    <Dot color={child.color} size={8} />
-                    <span className={`text-sm flex-1 ${value === child.id ? 'text-blue-700 font-medium' : 'text-gray-700'}`}>
-                      {child.name}
-                    </span>
-                    {value === child.id && (
-                      <span className="text-[10px] text-blue-500 flex-shrink-0">✓</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            );
-          })}
+          className="bg-white border border-gray-200 rounded-xl shadow-2xl flex flex-col max-h-72">
+          {/* Search box */}
+          <div className="p-2 border-b border-gray-100 flex-shrink-0">
+            <input
+              ref={searchRef}
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar categoria..."
+              className="w-full text-sm px-2.5 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+              onKeyDown={e => { if (e.key === 'Escape') { setOpen(false); setSearch(''); } }}
+            />
+          </div>
+
+          {/* Options list */}
+          <div className="overflow-y-auto flex-1">
+            {/* Flat search results */}
+            {filteredFlat && (
+              filteredFlat.length === 0
+                ? <div className="px-4 py-3 text-sm text-gray-400">Nenhuma categoria encontrada</div>
+                : filteredFlat.map(cat => {
+                    const pName = parentName(cat);
+                    return (
+                      <button key={cat.id} type="button"
+                        onMouseDown={e => { e.preventDefault(); select(cat.id); }}
+                        className={`w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors ${value === cat.id ? 'bg-blue-50' : ''}`}>
+                        <Dot color={cat.color} size={pName ? 8 : 10} />
+                        <span className="flex-1 min-w-0">
+                          {pName && <span className="text-xs text-gray-400 mr-1">{pName} ›</span>}
+                          <span className={`text-sm ${pName ? '' : 'font-semibold'} ${value === cat.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                            {cat.name}
+                          </span>
+                        </span>
+                        {value === cat.id && <span className="text-[10px] text-blue-500 flex-shrink-0">✓</span>}
+                      </button>
+                    );
+                  })
+            )}
+
+            {/* Hierarchical (no search) */}
+            {!filteredFlat && (
+              parents.length === 0
+                ? <div className="px-4 py-3 text-sm text-gray-400">Nenhuma categoria disponível</div>
+                : parents.map(parent => {
+                    const children = childrenOf(parent.id);
+                    return (
+                      <div key={parent.id}>
+                        <button type="button"
+                          onMouseDown={e => { e.preventDefault(); select(parent.id); }}
+                          className={`w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors ${value === parent.id ? 'bg-blue-50' : ''}`}>
+                          <Dot color={parent.color} size={10} />
+                          <span className={`text-sm font-semibold flex-1 ${value === parent.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                            {parent.name}
+                          </span>
+                          {children.length > 0 && (
+                            <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                              {children.length}
+                            </span>
+                          )}
+                        </button>
+                        {children.map(child => (
+                          <button key={child.id} type="button"
+                            onMouseDown={e => { e.preventDefault(); select(child.id); }}
+                            className={`w-full text-left pl-7 pr-3 py-1.5 flex items-center gap-2 hover:bg-gray-50 transition-colors ${value === child.id ? 'bg-blue-50' : ''}`}>
+                            <span className="text-gray-300 text-xs flex-shrink-0">↳</span>
+                            <Dot color={child.color} size={8} />
+                            <span className={`text-sm flex-1 ${value === child.id ? 'text-blue-700 font-medium' : 'text-gray-700'}`}>
+                              {child.name}
+                            </span>
+                            {value === child.id && <span className="text-[10px] text-blue-500 flex-shrink-0">✓</span>}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })
+            )}
+          </div>
         </div>,
         document.body
       )}
@@ -276,11 +330,16 @@ export default function Transactions() {
       if (editing) {
         await api.put(`/transactions/${editing.id}`, payload);
         toast.success('Lançamento atualizado!');
+        setModalOpen(false);
       } else {
         await api.post('/transactions', payload);
-        toast.success('Lançamento criado!');
+        toast.success('Lançamento criado! Pronto para novo lançamento.');
+        // Keep modal open, reset form preserving type (income/expense)
+        setForm({ ...emptyForm, type: form.type, date: new Date().toISOString().split('T')[0] });
+        setAttachedFile(null);
+        setExistingInvoiceName('');
+        if (fileInputRef.current) fileInputRef.current.value = '';
       }
-      setModalOpen(false);
       load();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Erro ao salvar');
@@ -457,9 +516,21 @@ export default function Transactions() {
                     </td>
                     <td className="px-4 py-3 text-gray-700 max-w-[150px] truncate">{t.project_name}</td>
                     <td className="px-4 py-3">
-                      <span className="inline-flex items-center gap-1.5 text-xs">
-                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.category_color || '#6B7280' }} />
-                        {t.category_name}
+                      <span className="inline-flex items-center gap-1 text-xs">
+                        {(t as any).category_parent_name ? (
+                          <>
+                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: (t as any).category_parent_color || '#6B7280' }} />
+                            <span className="text-gray-400">{(t as any).category_parent_name}</span>
+                            <span className="text-gray-300">›</span>
+                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.category_color || '#6B7280' }} />
+                            <span className="font-medium">{t.category_name}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.category_color || '#6B7280' }} />
+                            {t.category_name}
+                          </>
+                        )}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-700 max-w-[200px]">

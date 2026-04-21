@@ -5,20 +5,28 @@ import fs from 'fs';
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'cashflow.db');
 
-// Ensure data directory exists
 const dataDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const db = new Database(DB_PATH);
+// ── Mutable connection — replaced in-place on restore ────────────────────────
+let _db = new Database(DB_PATH);
+_db.pragma('journal_mode = WAL');
+_db.pragma('foreign_keys = ON');
 
-// Enable WAL mode for better performance
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// Proxy forwards every call to the current _db.
+// When reinitDb() replaces _db, all subsequent route calls use the new instance
+// without any import changes in route files.
+const db = new Proxy({} as InstanceType<typeof Database>, {
+  get(_, prop: string | symbol) {
+    const val = (_db as any)[prop as string];
+    return typeof val === 'function' ? (val as Function).bind(_db) : val;
+  },
+}) as InstanceType<typeof Database>;
 
 export function initDatabase() {
-  db.exec(`
+  _db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -124,7 +132,6 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_audit_table   ON audit_logs(table_name);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
 
-    -- Performance indexes on columns present at CREATE TABLE time
     CREATE INDEX IF NOT EXISTS idx_tx_project   ON transactions(project_id);
     CREATE INDEX IF NOT EXISTS idx_tx_category  ON transactions(category_id);
     CREATE INDEX IF NOT EXISTS idx_tx_date      ON transactions(date);
@@ -133,10 +140,8 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_tx_proj_type ON transactions(project_id, type);
     CREATE INDEX IF NOT EXISTS idx_tx_proj_date ON transactions(project_id, date);
 
-    -- Projects
     CREATE INDEX IF NOT EXISTS idx_proj_status  ON projects(status);
 
-    -- Budgets
     CREATE INDEX IF NOT EXISTS idx_budget_proj  ON budgets(project_id);
     CREATE INDEX IF NOT EXISTS idx_budget_cat   ON budgets(category_id);
 
@@ -160,12 +165,10 @@ export function initDatabase() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- Contacts indexes (after table creation)
     CREATE INDEX IF NOT EXISTS idx_contact_name ON contacts(name);
     CREATE INDEX IF NOT EXISTS idx_contact_type ON contacts(type);
   `);
 
-  // Migrations: add new columns to existing tables if not present
   const txMigrations: [string, string][] = [
     ['due_date',           'ALTER TABLE transactions ADD COLUMN due_date TEXT'],
     ['payment_date',       'ALTER TABLE transactions ADD COLUMN payment_date TEXT'],
@@ -175,43 +178,37 @@ export function initDatabase() {
     ['parent_id',          'ALTER TABLE transactions ADD COLUMN parent_id TEXT'],
   ];
   for (const [, sql] of txMigrations) {
-    try { db.exec(sql); } catch { /* column already exists */ }
+    try { _db.exec(sql); } catch { /* column already exists */ }
   }
 
-  // Indexes on migrated columns (must run after ALTER TABLE)
   const postMigrationIndexes = [
     'CREATE INDEX IF NOT EXISTS idx_tx_status ON transactions(status)',
     'CREATE INDEX IF NOT EXISTS idx_tx_due    ON transactions(due_date)',
   ];
   for (const sql of postMigrationIndexes) {
-    try { db.exec(sql); } catch { /* index already exists */ }
+    try { _db.exec(sql); } catch { /* index already exists */ }
   }
 
-  // Projects migrations
   const projectMigrations: string[] = [
     'ALTER TABLE projects ADD COLUMN progress_pct REAL NOT NULL DEFAULT 0',
   ];
   for (const sql of projectMigrations) {
-    try { db.exec(sql); } catch { /* column already exists */ }
+    try { _db.exec(sql); } catch { /* column already exists */ }
   }
 
-  // Seed default admin user if not exists
-  // IMPORTANT: Change the default password immediately after first login.
-  const adminExists = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@empresa.com');
+  const adminExists = _db.prepare('SELECT id FROM users WHERE email = ?').get('admin@empresa.com');
   if (!adminExists) {
     const { v4: uuidv4 } = require('uuid');
-    const hash = bcrypt.hashSync('Admin123', 10); // Must be changed on first login
-    db.prepare(`INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)`)
+    const hash = bcrypt.hashSync('Admin123', 10);
+    _db.prepare(`INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)`)
       .run(uuidv4(), 'Administrador', 'admin@empresa.com', hash, 'admin');
     console.warn('[SEGURANÇA] Usuário administrador padrão criado. TROQUE A SENHA IMEDIATAMENTE: admin@empresa.com');
   }
 
-  // Seed default categories
-  const catCount = db.prepare('SELECT COUNT(*) as c FROM categories').get() as { c: number };
+  const catCount = _db.prepare('SELECT COUNT(*) as c FROM categories').get() as { c: number };
   if (catCount.c === 0) {
     const { v4: uuidv4 } = require('uuid');
     const defaultCategories = [
-      // Expenses
       { name: 'Mão de Obra', type: 'expense', color: '#EF4444', icon: 'hard-hat' },
       { name: 'Materiais de Construção', type: 'expense', color: '#F97316', icon: 'package' },
       { name: 'Equipamentos', type: 'expense', color: '#EAB308', icon: 'wrench' },
@@ -220,29 +217,36 @@ export function initDatabase() {
       { name: 'Transporte e Frete', type: 'expense', color: '#8B5CF6', icon: 'truck' },
       { name: 'Administrativo', type: 'expense', color: '#EC4899', icon: 'briefcase' },
       { name: 'Outros Gastos', type: 'expense', color: '#6B7280', icon: 'more-horizontal' },
-      // Income
       { name: 'Medição Contratual', type: 'income', color: '#10B981', icon: 'trending-up' },
       { name: 'Adiantamento', type: 'income', color: '#3B82F6', icon: 'dollar-sign' },
       { name: 'Retenção Liberada', type: 'income', color: '#6366F1', icon: 'unlock' },
       { name: 'Outras Receitas', type: 'income', color: '#14B8A6', icon: 'plus-circle' },
     ];
-    const insert = db.prepare(`INSERT INTO categories (id, name, type, color, icon, is_default) VALUES (?, ?, ?, ?, ?, 1)`);
+    const insert = _db.prepare(`INSERT INTO categories (id, name, type, color, icon, is_default) VALUES (?, ?, ?, ?, ?, 1)`);
     for (const cat of defaultCategories) {
+      const { v4: uuidv4 } = require('uuid');
       insert.run(uuidv4(), cat.name, cat.type, cat.color, cat.icon);
     }
   }
 }
 
-/** Flush WAL, close the connection, replace the DB file, and remove leftover WAL artefacts.
- *  Call this only during a restore operation; the process must restart afterwards. */
-export function closeAndReplaceDb(newDbPath: string) {
-  db.pragma('wal_checkpoint(FULL)');
-  db.close();
+/**
+ * Replace the database file with a restored backup and reopen the connection
+ * in-place — no process restart required.
+ */
+export function reinitDb(newDbPath: string) {
+  _db.pragma('wal_checkpoint(FULL)');
+  _db.close();
   fs.copyFileSync(newDbPath, DB_PATH);
   for (const ext of ['-wal', '-shm']) {
     const f = DB_PATH + ext;
     if (fs.existsSync(f)) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
   }
+  _db = new Database(DB_PATH);
+  _db.pragma('journal_mode = WAL');
+  _db.pragma('foreign_keys = ON');
+  initDatabase();
+  console.log('[DB] Banco de dados restaurado e reconectado sem reiniciar o processo.');
 }
 
 export { DB_PATH };
