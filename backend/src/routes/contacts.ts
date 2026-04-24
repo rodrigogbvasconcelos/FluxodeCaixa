@@ -110,4 +110,50 @@ router.delete('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: R
   res.json({ message: 'Contato excluído' });
 });
 
+// Import contacts from CSV/JSON array
+router.post('/import', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
+  const { rows } = req.body;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'Nenhum registro para importar' });
+  }
+
+  const VALID_TYPES_C = new Set(['client', 'supplier', 'both']);
+  const insert = db.prepare(`
+    INSERT INTO contacts (id, name, type, document_type, document_number, phone, email,
+      cep, address, number, complement, neighborhood, city, state, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  let imported = 0;
+  const errors: string[] = [];
+
+  const importMany = db.transaction(() => {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const lineNum = i + 2;
+      if (!r.name || !r.type) {
+        errors.push(`Linha ${lineNum}: nome e tipo são obrigatórios`);
+        continue;
+      }
+      if (!VALID_TYPES_C.has(String(r.type))) {
+        errors.push(`Linha ${lineNum}: tipo inválido "${r.type}" (use client, supplier ou both)`);
+        continue;
+      }
+      try {
+        insert.run(uuidv4(), String(r.name).slice(0, 200), r.type,
+          r.document_type || null, r.document_number || null,
+          r.phone || null, r.email || null, r.cep || null,
+          r.address || null, r.number || null, r.complement || null,
+          r.neighborhood || null, r.city || null, r.state || null, r.notes || null);
+        imported++;
+      } catch (e: any) {
+        errors.push(`Linha ${lineNum}: ${e.message}`);
+      }
+    }
+  });
+
+  importMany();
+  res.json({ imported, errors });
+});
+
 export default router;

@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { Plus, Edit2, Trash2, Tag, ChevronRight, ChevronDown } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { Plus, Edit2, Trash2, Tag, ChevronRight, ChevronDown, Download, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import { Category } from '../types';
 import Modal from '../components/UI/Modal';
 import ConfirmDialog from '../components/UI/ConfirmDialog';
+import { useAuth } from '../contexts/AuthContext';
 
 const COLORS = [
   '#EF4444', '#F97316', '#EAB308', '#84CC16', '#10B981',
@@ -15,6 +16,7 @@ const COLORS = [
 const emptyForm = { name: '', type: 'expense' as 'income' | 'expense', color: '#3B82F6', icon: 'tag', parent_id: '' };
 
 export default function Categories() {
+  const { hasRole } = useAuth();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -24,11 +26,68 @@ export default function Categories() {
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<'expense' | 'income'>('expense');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const importCatRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
 
   const load = () => {
     api.get('/categories').then(r => setCategories(r.data)).finally(() => setLoading(false));
   };
   useEffect(load, []);
+
+  const exportCSV = () => {
+    const header = ['nome', 'tipo', 'cor', 'icone', 'categoria_pai'];
+    const lines = [header.join(';')];
+    const parents = categories.filter(c => !c.parent_id);
+    const children = categories.filter(c => !!c.parent_id);
+    for (const c of [...parents, ...children]) {
+      const parentName = c.parent_id ? (categories.find(p => p.id === c.parent_id)?.name || '') : '';
+      lines.push([
+        `"${c.name.replace(/"/g, '""')}"`,
+        c.type, c.color, c.icon,
+        `"${parentName.replace(/"/g, '""')}"`,
+      ].join(';'));
+    }
+    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'categorias.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const lines = text.replace(/\r/g, '').split('\n').filter(Boolean);
+      if (lines.length < 2) { toast.error('Arquivo vazio ou sem registros'); return; }
+      const sep = lines[0].includes(';') ? ';' : ',';
+      const headers = lines[0].split(sep).map(h => h.trim().toLowerCase().replace(/[^a-z_]/g, ''));
+      const rows = lines.slice(1).map(line => {
+        const vals = line.split(sep);
+        const obj: any = {};
+        headers.forEach((h, i) => { obj[h] = (vals[i] || '').replace(/^"|"$/g, '').trim(); });
+        return obj;
+      });
+      const mapped = rows.map(r => ({
+        name: r.nome || r.name,
+        type: r.tipo || r.type,
+        color: r.cor || r.color || '#6B7280',
+        icon: r.icone || r.icon || 'tag',
+        parent_name: r.categoria_pai || r.parent_name || '',
+      }));
+      const res = await api.post('/categories/import', { rows: mapped });
+      toast.success(`${res.data.imported} categoria(s) importada(s)!`);
+      if (res.data.errors?.length) toast.error(`${res.data.errors.length} erro(s): ${res.data.errors[0]}`);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Erro ao importar');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const openNew = (type: 'income' | 'expense', parentId?: string) => {
     setEditing(null);
@@ -161,14 +220,27 @@ export default function Categories() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Categorias</h1>
           <p className="text-gray-500 text-sm">Organize receitas e despesas por categoria</p>
         </div>
-        <button onClick={() => openNew(tab)} className="btn-primary">
-          <Plus size={16} /> Nova Categoria
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={exportCSV} className="btn-secondary">
+            <Download size={15} /> Exportar
+          </button>
+          {hasRole('admin', 'manager') && (
+            <>
+              <input ref={importCatRef} type="file" accept=".csv" className="hidden" onChange={handleImportFile} />
+              <button onClick={() => importCatRef.current?.click()} disabled={importing} className="btn-secondary">
+                <Upload size={15} /> {importing ? 'Importando...' : 'Importar'}
+              </button>
+            </>
+          )}
+          <button onClick={() => openNew(tab)} className="btn-primary">
+            <Plus size={16} /> Nova Categoria
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}

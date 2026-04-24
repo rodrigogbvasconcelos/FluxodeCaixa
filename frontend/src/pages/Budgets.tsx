@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Save, Trash2, Calculator, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react';
+import { Save, Trash2, Calculator, TrendingUp, TrendingDown, BarChart2, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import { Project, Category, Budget } from '../types';
@@ -18,6 +18,7 @@ export default function Budgets() {
   const [comparison, setComparison] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Budget | null>(null);
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     api.get('/projects').then(r => setProjects(r.data));
@@ -93,8 +94,44 @@ export default function Budgets() {
   // Global totals for comparison
   const expenseComparison = comparison.filter(c => c.type === 'expense' && (c.budget > 0 || c.actual > 0));
   const incomeComparison = comparison.filter(c => c.type === 'income' && (c.budget > 0 || c.actual > 0));
-  const totalBudgeted = expenseComparison.reduce((s, c) => s + c.budget, 0);
-  const totalActual = expenseComparison.reduce((s, c) => s + c.actual, 0);
+
+  // Build parent-grouped view: parents show aggregated totals from themselves + children
+  const expenseParents = expenseComparison.filter(c => !c.parent_id);
+  const expenseChildren = expenseComparison.filter(c => !!c.parent_id);
+
+  const parentRows = expenseParents.map(parent => {
+    const children = expenseChildren.filter(c => c.parent_id === parent.id);
+    const aggActual = parent.actual + children.reduce((s: number, c: any) => s + c.actual, 0);
+    const aggBudget = parent.budget + children.reduce((s: number, c: any) => s + c.budget, 0);
+    return { ...parent, aggActual, aggBudget, children };
+  });
+
+  // Also include orphan children (whose parent has no data but child has)
+  const orphanChildren = expenseChildren.filter(c => !expenseParents.find(p => p.id === c.parent_id));
+  const orphanParentIds = [...new Set(orphanChildren.map(c => c.parent_id))];
+  for (const pid of orphanParentIds) {
+    const children = expenseChildren.filter(c => c.parent_id === pid);
+    const parentCat = comparison.find(c => c.id === pid);
+    if (parentCat) {
+      const aggActual = (parentCat.actual || 0) + children.reduce((s: number, c: any) => s + c.actual, 0);
+      const aggBudget = (parentCat.budget || 0) + children.reduce((s: number, c: any) => s + c.budget, 0);
+      parentRows.push({ ...parentCat, aggActual, aggBudget, children });
+    } else {
+      // No parent category exists, show children as top-level
+      for (const child of children) parentRows.push({ ...child, aggActual: child.actual, aggBudget: child.budget, children: [] });
+    }
+  }
+
+  const toggleParent = (id: string) => {
+    setExpandedParents(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const totalBudgeted = parentRows.reduce((s, r) => s + r.aggBudget, 0);
+  const totalActual = parentRows.reduce((s, r) => s + r.aggActual, 0);
   const totalDiff = totalBudgeted - totalActual;
   const totalPct = totalBudgeted > 0 ? (totalActual / totalBudgeted) * 100 : null;
   const totalIncome = incomeComparison.reduce((s, c) => s + c.actual, 0);
@@ -248,7 +285,7 @@ export default function Budgets() {
               )}
 
               {/* By category table */}
-              {expenseComparison.length > 0 && (
+              {parentRows.length > 0 && (
                 <>
                   <h4 className="text-sm font-semibold text-gray-700 mb-2">Por Categoria</h4>
                   <div className="overflow-x-auto">
@@ -263,30 +300,70 @@ export default function Budgets() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {expenseComparison.map((c: any) => {
-                          const diff = c.budget - c.actual;
-                          const pct = c.budget > 0 ? (c.actual / c.budget) * 100 : null;
-                          const over = c.actual > c.budget && c.budget > 0;
+                        {parentRows.map((row: any) => {
+                          const diff = row.aggBudget - row.aggActual;
+                          const pct = row.aggBudget > 0 ? (row.aggActual / row.aggBudget) * 100 : null;
+                          const over = row.aggActual > row.aggBudget && row.aggBudget > 0;
+                          const hasChildren = row.children.length > 0;
+                          const expanded = expandedParents.has(row.id);
 
                           return (
-                            <tr key={c.id} className="hover:bg-gray-50">
-                              <td className="py-2.5 px-3">
-                                <span className="flex items-center gap-2">
-                                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: c.color }} />
-                                  {c.name}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-3 text-right text-gray-600">{fmtCurrency(c.budget)}</td>
-                              <td className={`py-2.5 px-3 text-right font-medium ${over ? 'text-red-600' : 'text-gray-900'}`}>
-                                {fmtCurrency(c.actual)}
-                              </td>
-                              <td className={`py-2.5 px-3 text-right font-medium ${diff >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                {diff >= 0 ? '+' : ''}{fmtCurrency(diff)}
-                              </td>
-                              <td className={`py-2.5 px-3 text-right ${over ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
-                                {pct !== null ? `${pct.toFixed(1)}%` : '-'}
-                              </td>
-                            </tr>
+                            <React.Fragment key={row.id}>
+                              <tr
+                                className={`hover:bg-gray-50 ${hasChildren ? 'cursor-pointer' : ''}`}
+                                onClick={() => hasChildren && toggleParent(row.id)}
+                              >
+                                <td className="py-2.5 px-3">
+                                  <span className="flex items-center gap-2">
+                                    {hasChildren ? (
+                                      <ChevronRight size={14} className={`text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`} />
+                                    ) : (
+                                      <span className="w-3.5 flex-shrink-0" />
+                                    )}
+                                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: row.color }} />
+                                    <span className="font-medium">{row.name}</span>
+                                    {hasChildren && (
+                                      <span className="text-xs text-gray-400 ml-1">({row.children.length} subcategorias)</span>
+                                    )}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 text-right text-gray-600">{fmtCurrency(row.aggBudget)}</td>
+                                <td className={`py-2.5 px-3 text-right font-medium ${over ? 'text-red-600' : 'text-gray-900'}`}>
+                                  {fmtCurrency(row.aggActual)}
+                                </td>
+                                <td className={`py-2.5 px-3 text-right font-medium ${diff >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                  {diff >= 0 ? '+' : ''}{fmtCurrency(diff)}
+                                </td>
+                                <td className={`py-2.5 px-3 text-right ${over ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
+                                  {pct !== null ? `${pct.toFixed(1)}%` : '-'}
+                                </td>
+                              </tr>
+                              {expanded && row.children.map((child: any) => {
+                                const cdiff = child.budget - child.actual;
+                                const cpct = child.budget > 0 ? (child.actual / child.budget) * 100 : null;
+                                const cover = child.actual > child.budget && child.budget > 0;
+                                return (
+                                  <tr key={child.id} className="bg-gray-50 hover:bg-gray-100">
+                                    <td className="py-2 px-3 pl-10">
+                                      <span className="flex items-center gap-2 text-gray-600">
+                                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: child.color }} />
+                                        {child.name}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-3 text-right text-gray-500 text-xs">{fmtCurrency(child.budget)}</td>
+                                    <td className={`py-2 px-3 text-right text-xs ${cover ? 'text-red-600' : 'text-gray-700'}`}>
+                                      {fmtCurrency(child.actual)}
+                                    </td>
+                                    <td className={`py-2 px-3 text-right text-xs ${cdiff >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {cdiff >= 0 ? '+' : ''}{fmtCurrency(cdiff)}
+                                    </td>
+                                    <td className={`py-2 px-3 text-right text-xs ${cover ? 'text-red-600' : 'text-gray-400'}`}>
+                                      {cpct !== null ? `${cpct.toFixed(1)}%` : '-'}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </React.Fragment>
                           );
                         })}
                         {/* Total row */}

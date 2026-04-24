@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import {
   Plus, Search, Edit2, Trash2, Filter, FileText,
   ArrowUpRight, ArrowDownRight, ChevronLeft, ChevronRight, ChevronDown, Paperclip, X,
-  Download, Eye, Loader2
+  Download, Upload, Eye, Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
@@ -247,6 +247,9 @@ export default function Transactions() {
   // Invoice preview
   const [previewInvoice, setPreviewInvoice] = useState<{ name: string; mime?: string; url: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
+  // Import/Export
+  const importTxRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
   const LIMIT = 20;
 
   const load = useCallback(() => {
@@ -257,6 +260,7 @@ export default function Transactions() {
     if (filters.category_id) params.category_id = filters.category_id;
     if (filters.start_date) params.start_date = filters.start_date;
     if (filters.end_date) params.end_date = filters.end_date;
+    if (filters.search) params.search = filters.search;
 
     api.get('/transactions', { params }).then(r => {
       setTransactions(r.data.data);
@@ -280,6 +284,80 @@ export default function Transactions() {
       }
     }
   }, [form.project_id, form.type, projects, editing]);
+
+  const exportCSV = async () => {
+    const params: any = { page: 1, limit: 5000 };
+    if (filters.project_id) params.project_id = filters.project_id;
+    if (filters.type) params.type = filters.type;
+    if (filters.category_id) params.category_id = filters.category_id;
+    if (filters.start_date) params.start_date = filters.start_date;
+    if (filters.end_date) params.end_date = filters.end_date;
+    if (filters.search) params.search = filters.search;
+
+    const r = await api.get('/transactions', { params });
+    const rows: any[] = r.data.data;
+    const header = ['data', 'tipo', 'projeto_id', 'categoria_id', 'descricao', 'fornecedor_cliente', 'valor', 'documento', 'metodo_pagamento', 'vencimento', 'pagamento', 'status', 'observacoes'];
+    const lines = [header.join(';')];
+    for (const t of rows) {
+      lines.push([
+        t.date, t.type, t.project_id, t.category_id,
+        `"${(t.description || '').replace(/"/g, '""')}"`,
+        `"${(t.vendor || '').replace(/"/g, '""')}"`,
+        String(t.amount).replace('.', ','),
+        t.document_number || '', t.payment_method || '',
+        t.due_date || '', t.payment_date || '', t.status || 'paid',
+        `"${(t.notes || '').replace(/"/g, '""')}"`,
+      ].join(';'));
+    }
+    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'lancamentos.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const lines = text.replace(/\r/g, '').split('\n').filter(Boolean);
+      if (lines.length < 2) { toast.error('Arquivo vazio ou sem registros'); return; }
+      const sep = lines[0].includes(';') ? ';' : ',';
+      const headers = lines[0].split(sep).map(h => h.trim().toLowerCase().replace(/[^a-z_]/g, ''));
+      const rows = lines.slice(1).map(line => {
+        const vals = line.split(sep);
+        const obj: any = {};
+        headers.forEach((h, i) => { obj[h] = (vals[i] || '').replace(/^"|"$/g, '').trim(); });
+        return obj;
+      });
+      const mapped = rows.map(r => ({
+        project_id: r.projeto_id || r.project_id,
+        category_id: r.categoria_id || r.category_id,
+        type: r.tipo || r.type,
+        amount: (r.valor || r.amount || '0').replace(',', '.'),
+        description: r.descricao || r.description || r.descri_o,
+        vendor: r.fornecedor_cliente || r.vendor,
+        document_number: r.documento || r.document_number,
+        date: r.data || r.date,
+        payment_method: r.metodo_pagamento || r.payment_method,
+        due_date: r.vencimento || r.due_date,
+        payment_date: r.pagamento || r.payment_date,
+        status: r.status,
+        notes: r.observacoes || r.notes,
+      }));
+      const res = await api.post('/transactions/import', { rows: mapped });
+      toast.success(`${res.data.imported} lançamento(s) importado(s)!`);
+      if (res.data.errors?.length) toast.error(`${res.data.errors.length} erro(s): ${res.data.errors[0]}`);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Erro ao importar');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const openNew = (type?: 'income' | 'expense') => {
     setEditing(null);
@@ -371,7 +449,7 @@ export default function Transactions() {
     setPreviewLoading(invoiceId);
     try {
       const res = await api.get(`/invoices/${invoiceId}/view`, { responseType: 'blob' });
-      const mime = res.headers['content-type'] || '';
+      const mime = String(res.headers['content-type'] || '');
       const blob = new Blob([res.data], { type: mime });
       const url = URL.createObjectURL(blob);
       const isPreviewable = mime.includes('pdf') || mime.includes('image');
@@ -410,16 +488,29 @@ export default function Transactions() {
           <h1 className="text-2xl font-bold text-gray-900">Lançamentos</h1>
           <p className="text-gray-500 text-sm">{total} lançamento(s)</p>
         </div>
-        {hasRole('admin', 'manager', 'operator') && (
-          <div className="flex gap-2">
-            <button onClick={() => openNew('income')} className="btn-success text-sm">
-              <ArrowUpRight size={15} /> Receita
-            </button>
-            <button onClick={() => openNew('expense')} className="btn-danger text-sm">
-              <ArrowDownRight size={15} /> Despesa
-            </button>
-          </div>
-        )}
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={exportCSV} className="btn-secondary text-sm">
+            <Download size={15} /> Exportar
+          </button>
+          {hasRole('admin', 'manager') && (
+            <>
+              <input ref={importTxRef} type="file" accept=".csv" className="hidden" onChange={handleImportFile} />
+              <button onClick={() => importTxRef.current?.click()} disabled={importing} className="btn-secondary text-sm">
+                <Upload size={15} /> {importing ? 'Importando...' : 'Importar'}
+              </button>
+            </>
+          )}
+          {hasRole('admin', 'manager', 'operator') && (
+            <>
+              <button onClick={() => openNew('income')} className="btn-success text-sm">
+                <ArrowUpRight size={15} /> Receita
+              </button>
+              <button onClick={() => openNew('expense')} className="btn-danger text-sm">
+                <ArrowDownRight size={15} /> Despesa
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Summary */}
@@ -445,8 +536,8 @@ export default function Transactions() {
         <div className="flex gap-3 flex-wrap">
           <div className="relative flex-1 min-w-[200px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input placeholder="Buscar..." value={filters.search}
-              onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+            <input placeholder="Buscar descrição, fornecedor..." value={filters.search}
+              onChange={e => { setFilters(f => ({ ...f, search: e.target.value })); setPage(1); }}
               className="form-input pl-8 py-2 text-sm" />
           </div>
           <select className="form-input py-2 text-sm min-w-[140px]" value={filters.project_id}
@@ -460,26 +551,34 @@ export default function Transactions() {
             <option value="income">Receitas</option>
             <option value="expense">Despesas</option>
           </select>
-          <button onClick={() => setShowFilters(!showFilters)} className="btn-secondary text-sm py-2">
+          <button onClick={() => setShowFilters(!showFilters)}
+            className={`btn-secondary text-sm py-2 ${(filters.category_id || filters.start_date || filters.end_date) ? 'ring-2 ring-blue-400' : ''}`}>
             <Filter size={14} /> {showFilters ? 'Menos' : 'Mais'} filtros
           </button>
         </div>
         {showFilters && (
           <div className="flex gap-3 flex-wrap mt-3 pt-3 border-t border-gray-100">
-            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+            <div className="flex-1 min-w-[220px]">
+              <CategorySelect
+                categories={categories}
+                value={filters.category_id}
+                onChange={id => { setFilters(f => ({ ...f, category_id: id })); setPage(1); }}
+              />
+            </div>
+            <div className="flex items-center gap-2 flex-1 min-w-[180px]">
               <span className="text-xs text-gray-500 whitespace-nowrap">De:</span>
               <BrDateInput className="form-input py-2 text-sm flex-1"
                 value={filters.start_date}
                 onChange={v => { setFilters(f => ({ ...f, start_date: v })); setPage(1); }} />
             </div>
-            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+            <div className="flex items-center gap-2 flex-1 min-w-[180px]">
               <span className="text-xs text-gray-500 whitespace-nowrap">Até:</span>
               <BrDateInput className="form-input py-2 text-sm flex-1"
                 value={filters.end_date}
                 onChange={v => { setFilters(f => ({ ...f, end_date: v })); setPage(1); }} />
             </div>
             <button onClick={() => { setFilters({ search: '', project_id: '', type: '', category_id: '', start_date: '', end_date: '' }); setPage(1); }}
-              className="btn-secondary text-sm py-2 text-red-500">Limpar</button>
+              className="btn-secondary text-sm py-2 text-red-500">Limpar tudo</button>
           </div>
         )}
       </div>

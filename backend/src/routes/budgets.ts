@@ -82,7 +82,7 @@ router.get('/comparison', (req: AuthRequest, res: Response) => {
 
   const data = db.prepare(`
     SELECT
-      c.id, c.name, c.type, c.color,
+      c.id, c.name, c.type, c.color, c.parent_id,
       COALESCE(SUM(t.amount), 0) as actual,
       COALESCE((
         SELECT SUM(b.amount) FROM budgets b
@@ -92,7 +92,7 @@ router.get('/comparison', (req: AuthRequest, res: Response) => {
     LEFT JOIN transactions t ON t.category_id = c.id ${where}
     GROUP BY c.id
     HAVING actual > 0 OR budget > 0
-    ORDER BY c.type, actual DESC
+    ORDER BY c.type, c.parent_id NULLS FIRST, c.name
   `).all(...params);
 
   res.json(data);

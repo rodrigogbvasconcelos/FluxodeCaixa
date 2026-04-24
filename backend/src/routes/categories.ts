@@ -39,4 +39,51 @@ router.delete('/:id', requireRole('admin'), (req: AuthRequest, res: Response) =>
   res.json({ message: 'Categoria excluída' });
 });
 
+// Import categories from CSV/JSON array — parents must come before their children
+router.post('/import', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
+  const { rows } = req.body;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'Nenhum registro para importar' });
+  }
+
+  const VALID_TYPES = new Set(['income', 'expense']);
+  const insert = db.prepare(
+    'INSERT INTO categories (id, name, type, color, icon, parent_id) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+
+  let imported = 0;
+  const errors: string[] = [];
+  const nameToId: Record<string, string> = {};
+
+  const importMany = db.transaction(() => {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const lineNum = i + 2;
+      if (!r.name || !r.type) {
+        errors.push(`Linha ${lineNum}: nome e tipo são obrigatórios`);
+        continue;
+      }
+      if (!VALID_TYPES.has(String(r.type))) {
+        errors.push(`Linha ${lineNum}: tipo inválido "${r.type}" (use income ou expense)`);
+        continue;
+      }
+      const parentId = r.parent_name
+        ? (nameToId[String(r.parent_name)] ?? null)
+        : (r.parent_id || null);
+      const id = uuidv4();
+      try {
+        insert.run(id, String(r.name).slice(0, 100), r.type,
+          r.color || '#6B7280', r.icon || 'tag', parentId);
+        nameToId[String(r.name)] = id;
+        imported++;
+      } catch (e: any) {
+        errors.push(`Linha ${lineNum}: ${e.message}`);
+      }
+    }
+  });
+
+  importMany();
+  res.json({ imported, errors });
+});
+
 export default router;

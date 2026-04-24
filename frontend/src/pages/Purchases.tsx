@@ -55,7 +55,10 @@ export default function Purchases() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     api.get('/projects').then(r => setProjects(r.data));
-    api.get('/contacts').then(r => setSuppliers(r.data.filter((c: any) => c.type === 'supplier' || c.type === 'both')));
+    api.get('/contacts', { params: { limit: 500 } }).then(r => {
+      const list: any[] = r.data.data ?? r.data;
+      setSuppliers(list.filter((c: any) => c.type === 'supplier' || c.type === 'both'));
+    });
     api.get('/categories').then(r => setCategories(r.data.filter((c: any) => c.type === 'expense')));
   }, []);
 

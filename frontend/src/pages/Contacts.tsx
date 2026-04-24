@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Search, Edit2, Trash2, Users, Building2, UserCheck, MapPin, Phone, Mail, Loader2, RefreshCw } from 'lucide-react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { Plus, Search, Edit2, Trash2, Users, Building2, UserCheck, MapPin, Phone, Mail, Loader2, RefreshCw, Download, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import Modal from '../components/UI/Modal';
@@ -52,6 +52,8 @@ export default function Contacts() {
   const [saving, setSaving] = useState(false);
   const [cepLoading, setCepLoading] = useState(false);
   const [cnpjLoading, setCnpjLoading] = useState(false);
+  const importContactRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -63,6 +65,78 @@ export default function Contacts() {
   }, [tab, search]);
 
   useEffect(load, [load]);
+
+  const exportCSV = () => {
+    const header = ['nome', 'tipo', 'tipo_documento', 'documento', 'telefone', 'email', 'cep', 'logradouro', 'numero', 'complemento', 'bairro', 'cidade', 'estado', 'observacoes'];
+    const lines = [header.join(';')];
+    for (const c of contacts) {
+      lines.push([
+        `"${(c.name || '').replace(/"/g, '""')}"`,
+        c.type,
+        c.document_type || '',
+        c.document_number || '',
+        c.phone || '',
+        c.email || '',
+        c.cep || '',
+        `"${(c.address || '').replace(/"/g, '""')}"`,
+        c.number || '',
+        `"${(c.complement || '').replace(/"/g, '""')}"`,
+        `"${(c.neighborhood || '').replace(/"/g, '""')}"`,
+        `"${(c.city || '').replace(/"/g, '""')}"`,
+        c.state || '',
+        `"${(c.notes || '').replace(/"/g, '""')}"`,
+      ].join(';'));
+    }
+    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'contatos.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const lines = text.replace(/\r/g, '').split('\n').filter(Boolean);
+      if (lines.length < 2) { toast.error('Arquivo vazio ou sem registros'); return; }
+      const sep = lines[0].includes(';') ? ';' : ',';
+      const headers = lines[0].split(sep).map(h => h.trim().toLowerCase().replace(/[^a-z_]/g, ''));
+      const rows = lines.slice(1).map(line => {
+        const vals = line.split(sep);
+        const obj: any = {};
+        headers.forEach((h, i) => { obj[h] = (vals[i] || '').replace(/^"|"$/g, '').trim(); });
+        return obj;
+      });
+      const mapped = rows.map(r => ({
+        name: r.nome || r.name,
+        type: r.tipo || r.type,
+        document_type: r.tipo_documento || r.document_type,
+        document_number: r.documento || r.document_number,
+        phone: r.telefone || r.phone,
+        email: r.email,
+        cep: r.cep,
+        address: r.logradouro || r.address,
+        number: r.numero || r.number,
+        complement: r.complemento || r.complement,
+        neighborhood: r.bairro || r.neighborhood,
+        city: r.cidade || r.city,
+        state: r.estado || r.state,
+        notes: r.observacoes || r.notes,
+      }));
+      const res = await api.post('/contacts/import', { rows: mapped });
+      toast.success(`${res.data.imported} contato(s) importado(s)!`);
+      if (res.data.errors?.length) toast.error(`${res.data.errors.length} erro(s): ${res.data.errors[0]}`);
+      load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Erro ao importar');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const openNew = (type?: 'client' | 'supplier') => {
     setEditing(null);
@@ -195,16 +269,25 @@ export default function Contacts() {
           <h1 className="text-2xl font-bold text-gray-900">Contatos</h1>
           <p className="text-gray-500 text-sm">Clientes e fornecedores</p>
         </div>
-        {hasRole('admin', 'manager') && (
-          <div className="flex gap-2">
-            <button onClick={() => openNew('client')} className="btn-primary text-sm">
-              <UserCheck size={15} /> Novo Cliente
-            </button>
-            <button onClick={() => openNew('supplier')} className="btn-secondary text-sm">
-              <Building2 size={15} /> Novo Fornecedor
-            </button>
-          </div>
-        )}
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={exportCSV} className="btn-secondary text-sm">
+            <Download size={15} /> Exportar
+          </button>
+          {hasRole('admin', 'manager') && (
+            <>
+              <input ref={importContactRef} type="file" accept=".csv" className="hidden" onChange={handleImportFile} />
+              <button onClick={() => importContactRef.current?.click()} disabled={importing} className="btn-secondary text-sm">
+                <Upload size={15} /> {importing ? 'Importando...' : 'Importar'}
+              </button>
+              <button onClick={() => openNew('client')} className="btn-primary text-sm">
+                <UserCheck size={15} /> Novo Cliente
+              </button>
+              <button onClick={() => openNew('supplier')} className="btn-secondary text-sm">
+                <Building2 size={15} /> Novo Fornecedor
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Tabs + Search */}

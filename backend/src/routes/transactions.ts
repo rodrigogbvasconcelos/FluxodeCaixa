@@ -17,7 +17,7 @@ function addMonths(dateStr: string, months: number): string {
 }
 
 router.get('/', (req: AuthRequest, res: Response) => {
-  const { project_id, type, category_id, start_date, end_date } = req.query;
+  const { project_id, type, category_id, start_date, end_date, search } = req.query;
   const rawPage  = parseInt(String(req.query.page  || '1'),  10);
   const rawLimit = parseInt(String(req.query.limit || '50'), 10);
 
@@ -36,6 +36,11 @@ router.get('/', (req: AuthRequest, res: Response) => {
   if (category_id) { where += ' AND t.category_id = ?';  params.push(category_id); }
   if (start_date)  { where += ' AND t.date >= ?';         params.push(start_date); }
   if (end_date)    { where += ' AND t.date <= ?';         params.push(end_date); }
+  if (search) {
+    const s = `%${String(search)}%`;
+    where += ' AND (t.description LIKE ? OR t.vendor LIKE ? OR t.document_number LIKE ?)';
+    params.push(s, s, s);
+  }
 
   const offset = (page - 1) * limit;
 
@@ -242,6 +247,56 @@ router.delete('/:id', requireRole('admin', 'manager'), (req: AuthRequest, res: R
   });
 
   res.json({ message: 'Lançamento excluído' });
+});
+
+// Import transactions from CSV/JSON array
+router.post('/import', requireRole('admin', 'manager'), (req: AuthRequest, res: Response) => {
+  const { rows } = req.body;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'Nenhum registro para importar' });
+  }
+
+  const insert = db.prepare(`
+    INSERT INTO transactions (id, project_id, category_id, type, amount, description, vendor,
+      document_number, date, payment_method, notes, due_date, payment_date, status, installments, installment_number, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
+  `);
+
+  let imported = 0;
+  const errors: string[] = [];
+
+  const importMany = db.transaction(() => {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const lineNum = i + 2;
+      if (!r.project_id || !r.category_id || !r.type || !r.amount || !r.description || !r.date) {
+        errors.push(`Linha ${lineNum}: campos obrigatórios faltando (obra, categoria, tipo, valor, descrição, data)`);
+        continue;
+      }
+      if (!VALID_TYPES.has(String(r.type))) {
+        errors.push(`Linha ${lineNum}: tipo inválido "${r.type}" (use income ou expense)`);
+        continue;
+      }
+      const amount = parseFloat(String(r.amount).replace(',', '.'));
+      if (isNaN(amount) || amount < 0) {
+        errors.push(`Linha ${lineNum}: valor inválido "${r.amount}"`);
+        continue;
+      }
+      try {
+        insert.run(uuidv4(), r.project_id, r.category_id, r.type, amount,
+          String(r.description).slice(0, 500), r.vendor || null, r.document_number || null,
+          r.date, r.payment_method || null, r.notes || null,
+          r.due_date || null, r.payment_date || null,
+          r.status || 'paid', req.user!.id);
+        imported++;
+      } catch (e: any) {
+        errors.push(`Linha ${lineNum}: ${e.message}`);
+      }
+    }
+  });
+
+  importMany();
+  res.json({ imported, errors });
 });
 
 export default router;
