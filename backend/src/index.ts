@@ -21,6 +21,7 @@ import contactRoutes from './routes/contacts';
 import auditRoutes from './routes/audit';
 import payablesRoutes from './routes/payables';
 import backupRoutes from './routes/backup';
+import purchaseRoutes from './routes/purchases';
 
 // ── Environment validation ───────────────────────────────────────────────────
 const isProduction = process.env.NODE_ENV === 'production';
@@ -126,6 +127,7 @@ app.use('/api/contacts', contactRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/payables', payablesRoutes);
 app.use('/api/backup', backupRoutes);
+app.use('/api/purchases', purchaseRoutes);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', version: '1.0.0' }));
 

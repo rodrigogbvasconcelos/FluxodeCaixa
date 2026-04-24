@@ -167,6 +167,40 @@ export function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_contact_name ON contacts(name);
     CREATE INDEX IF NOT EXISTS idx_contact_type ON contacts(type);
+
+    CREATE TABLE IF NOT EXISTS purchase_orders (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      supplier_id TEXT,
+      status TEXT NOT NULL DEFAULT 'draft',
+      order_date TEXT NOT NULL,
+      expected_date TEXT,
+      notes TEXT,
+      total_amount REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (supplier_id) REFERENCES contacts(id),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_order_items (
+      id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL,
+      description TEXT NOT NULL,
+      unit TEXT,
+      quantity REAL NOT NULL DEFAULT 1,
+      unit_price REAL NOT NULL DEFAULT 0,
+      category_id TEXT,
+      notes TEXT,
+      FOREIGN KEY (order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (category_id) REFERENCES categories(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_po_project ON purchase_orders(project_id);
+    CREATE INDEX IF NOT EXISTS idx_po_status  ON purchase_orders(status);
+    CREATE INDEX IF NOT EXISTS idx_poi_order  ON purchase_order_items(order_id);
   `);
 
   const txMigrations: [string, string][] = [

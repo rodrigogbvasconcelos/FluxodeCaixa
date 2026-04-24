@@ -72,6 +72,22 @@ router.get('/dashboard', (req: AuthRequest, res: Response) => {
     ORDER BY total DESC
   `).all();
 
+  const today2 = new Date().toISOString().split('T')[0];
+  const pendingSummary = db.prepare(`
+    SELECT
+      COUNT(*) as count,
+      COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END), 0) as expense,
+      COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END), 0) as income
+    FROM transactions WHERE status = 'pending'
+  `).get() as any;
+
+  const overdueSummary = db.prepare(`
+    SELECT COUNT(*) as count,
+      COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END), 0) as expense,
+      COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END), 0) as income
+    FROM transactions WHERE status='pending' AND due_date IS NOT NULL AND due_date < ?
+  `).get(today2) as any;
+
   res.json({
     totalProjects,
     totalIncome: totals?.total_income || 0,
@@ -82,6 +98,12 @@ router.get('/dashboard', (req: AuthRequest, res: Response) => {
     recentTransactions,
     expensesByCategory,
     incomeByCategory,
+    pendingExpense: pendingSummary?.expense || 0,
+    pendingIncome: pendingSummary?.income || 0,
+    pendingCount: pendingSummary?.count || 0,
+    overdueExpense: overdueSummary?.expense || 0,
+    overdueIncome: overdueSummary?.income || 0,
+    overdueCount: overdueSummary?.count || 0,
   });
 });
 

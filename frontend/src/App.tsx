@@ -16,6 +16,7 @@ const Audit               = lazy(() => import('./pages/Audit'));
 const Categories          = lazy(() => import('./pages/Categories'));
 const Contacts            = lazy(() => import('./pages/Contacts'));
 const PayablesReceivables = lazy(() => import('./pages/PayablesReceivables'));
+const Purchases           = lazy(() => import('./pages/Purchases'));
 const Backup              = lazy(() => import('./pages/Backup'));
 
 function PageLoader() {
@@ -82,6 +83,11 @@ function AppRoutes() {
           <Route path="payables" element={
             <PrivateRoute roles={['admin', 'manager', 'operator']}>
               <PayablesReceivables />
+            </PrivateRoute>
+          } />
+          <Route path="purchases" element={
+            <PrivateRoute roles={['admin', 'manager', 'operator']}>
+              <Purchases />
             </PrivateRoute>
           } />
           <Route path="backup" element={
