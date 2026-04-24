@@ -11,5 +11,11 @@
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "overrides": {
+    "uuid": "^14.0.0",
+    "exceljs": {
+      "uuid": "^14.0.0"
+    }
   }
 }
