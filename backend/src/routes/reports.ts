@@ -190,6 +190,14 @@ router.get('/budget-comparison', (req: AuthRequest, res: Response) => {
 // ─── Físico-Financeiro ──────────────────────────────────────────────────────
 router.get('/physical-financial', (req: AuthRequest, res: Response) => {
   const today = new Date().toISOString().split('T')[0];
+  const { project_id } = req.query;
+
+  let projectWhere = "p.status != 'archived'";
+  const baseParams: any[] = [today, today];
+  if (project_id) {
+    projectWhere += ' AND p.id = ?';
+    baseParams.push(project_id);
+  }
 
   const projects = db.prepare(`
     SELECT p.*,
@@ -209,9 +217,9 @@ router.get('/physical-financial', (req: AuthRequest, res: Response) => {
       (SELECT strftime('%Y-%m', MIN(date)) FROM transactions WHERE project_id = p.id) as first_tx_month,
       (SELECT strftime('%Y-%m', MAX(date)) FROM transactions WHERE project_id = p.id) as last_tx_month
     FROM projects p
-    WHERE p.status != 'archived'
+    WHERE ${projectWhere}
     ORDER BY p.name
-  `).all(today, today);
+  `).all(...baseParams);
 
   // Per-project monthly cash flow (for burn rate calculation)
   const result = (projects as any[]).map(proj => {
@@ -482,7 +490,7 @@ router.get('/expense-analytical', (req: AuthRequest, res: Response) => {
     FROM transactions t
     JOIN categories c ON c.id = t.category_id
     LEFT JOIN categories cp ON cp.id = c.parent_id
-    JOIN projects p ON p.id = t.project_id
+    LEFT JOIN projects p ON p.id = t.project_id
     WHERE ${dtWhere}
     ORDER BY t.date DESC, t.created_at DESC
     LIMIT 200
