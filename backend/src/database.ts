@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
+import { v4 as uuidv4 } from 'uuid';
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'cashflow.db');
 
@@ -232,7 +233,6 @@ export function initDatabase() {
 
   const adminExists = _db.prepare('SELECT id FROM users WHERE email = ?').get('admin@empresa.com');
   if (!adminExists) {
-    const { v4: uuidv4 } = require('uuid');
     const hash = bcrypt.hashSync('Admin123', 10);
     _db.prepare(`INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)`)
       .run(uuidv4(), 'Administrador', 'admin@empresa.com', hash, 'admin');
@@ -241,7 +241,6 @@ export function initDatabase() {
 
   const catCount = _db.prepare('SELECT COUNT(*) as c FROM categories').get() as { c: number };
   if (catCount.c === 0) {
-    const { v4: uuidv4 } = require('uuid');
     const defaultCategories = [
       { name: 'Mão de Obra', type: 'expense', color: '#EF4444', icon: 'hard-hat' },
       { name: 'Materiais de Construção', type: 'expense', color: '#F97316', icon: 'package' },
@@ -258,7 +257,6 @@ export function initDatabase() {
     ];
     const insert = _db.prepare(`INSERT INTO categories (id, name, type, color, icon, is_default) VALUES (?, ?, ?, ?, ?, 1)`);
     for (const cat of defaultCategories) {
-      const { v4: uuidv4 } = require('uuid');
       insert.run(uuidv4(), cat.name, cat.type, cat.color, cat.icon);
     }
   }

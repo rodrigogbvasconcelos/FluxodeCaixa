@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { v4 as uuidv4 } from 'uuid';
 import db from '../database';
 import { authenticate, AuthRequest } from '../middleware/auth';
 
@@ -60,7 +61,6 @@ router.post('/', (req: AuthRequest, res: Response) => {
   if (!order_date) return res.status(400).json({ error: 'Data do pedido é obrigatória' });
   if (!items.length) return res.status(400).json({ error: 'Adicione pelo menos um item' });
 
-  const { v4: uuidv4 } = require('uuid');
   const id = uuidv4();
 
   const totalAmount = (items as any[]).reduce((s: number, i: any) =>
@@ -105,8 +105,7 @@ router.put('/:id', (req: AuthRequest, res: Response) => {
     notes || null, totalAmount, req.params.id);
 
   if (items) {
-    const { v4: uuidv4 } = require('uuid');
-    db.prepare('DELETE FROM purchase_order_items WHERE order_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM purchase_order_items WHERE order_id = ?').run(req.params.id);
     const insertItem = db.prepare(`
       INSERT INTO purchase_order_items (id, order_id, description, unit, quantity, unit_price, category_id, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
